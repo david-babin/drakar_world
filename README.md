@@ -24,8 +24,8 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   `etopo1.jpg` et `bmng.jpg` du paquet PyPI `basemap-data` (simple zip à ouvrir), `land-50m.json` du paquet
   npm `world-atlas`. Sorties versionnées dans `public/` :
   `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko), `fond.png` (1536 × 768, type et niveau
-  d'altitude, 88 Ko), `cotes.bin` (1 424 arcs, 161 Ko), `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 /
-  4000 m, 182 Ko). Total ~580 Ko, mis en cache par le navigateur.
+  d'altitude, 88 Ko), `terres.bin` (1 419 anneaux déroulés, 163 Ko), `cotes.bin` (1 424 arcs, 161 Ko), `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 /
+  4000 m, 182 Ko). Total ~740 Ko, mis en cache par le navigateur.
 - `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
   `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
 - `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
@@ -33,10 +33,11 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
   seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
 - `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
-- `public/index.html` — globe WebGL (projection orthographique dans le shader, `fond.png` en texture),
-  côtes et courbes de niveau **vectorielles** projetées sur un calque mis en cache (redessiné quand la caméra
-  bouge), couche canvas (groupes, comptoirs, routes en arcs de grand cercle, régions), HUD, chronique,
-  boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
+- `public/index.html` — tout le géographique est rendu par le GPU dans une seule passe WebGL : le disque et
+  les classes de terrain (`fond.png`), les **terres** (anneaux Natural Earth remplis par parité de stencil
+  dans une texture 4096 × 2048, une fois au chargement), les **côtes et courbes de niveau** (quads extrudés
+  dans le vertex shader, indices 16 bits par blocs). Le canvas 2D ne porte que la vie : groupes, comptoirs,
+  routes en arcs de grand cercle, régions. Puis HUD, chronique, boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
   (confiné au globe : la page ne zoome jamais). Après 6 s sans manipulation, la caméra glisse d'elle-même
   vers la région en cours de calcul — la vôtre, sinon celle d'un autre témoin.
 
