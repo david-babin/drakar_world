@@ -1,27 +1,36 @@
 // sim.js — simulation déterministe partagée entre le serveur et les navigateurs.
-// Tout ici n'utilise que de l'arithmétique IEEE 754 de base (+ - * / floor) et un
-// PRNG entier : deux machines qui reçoivent la même unité produisent le même résultat.
+// Le monde est une sphère : grille équirectangulaire bouclée en longitude, pôles gelés.
+// Tout n'utilise que de l'arithmétique IEEE 754 de base et un PRNG entier : deux machines
+// qui reçoivent la même unité produisent le même résultat.
 
-export const W = 192, H = 108;          // carte
-export const RX = 4, RY = 3;            // découpage en régions
-export const RW = W / RX, RH = H / RY;  // 48 × 36 cellules par région
+export const W = 384, H = 192;          // grille (lon × lat), 0,94° par cellule
+export const RX = 6, RY = 4;            // découpage en régions
+export const RW = W / RX, RH = H / RY;  // 64 × 48 cellules
+export const NREG = RX * RY;
 export const STEPS = 240;               // saisons simulées par unité de travail
 export const MAX_AGENTS_REGION = 28;
 export const LEASE_MS = 90_000;
-export const FREEZE_MS = 6 * 3600_000;  // au-delà, on consigne un « gel »
+export const FREEZE_MS = 6 * 3600_000;
 
 export const LINEAGES = [
   ['Ambre', 38], ['Cendre', 205], ['Lichen', 95], ['Ocre', 20], ['Sel', 185],
   ['Garance', 350], ['Indigo', 235], ['Cuivre', 10], ['Brume', 260], ['Safran', 48],
-  ['Ardoise', 215], ['Bruyère', 305],
+  ['Ardoise', 215], ['Bruyère', 305], ['Jade', 150], ['Rouille', 0], ['Écume', 170], ['Suie', 270],
 ];
+export const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX', 'XXI', 'XXII', 'XXIII', 'XXIV'];
 
-export const REGION_NAMES = [
-  'nord-ouest', 'nord · ouest', 'nord · est', 'nord-est',
-  'ouest', 'centre · ouest', 'centre · est', 'est',
-  'sud-ouest', 'sud · ouest', 'sud · est', 'sud-est',
-];
-export const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+// ---------- géométrie ----------
+export const lonOf = x => ((x + 0.5) / W) * 360 - 180;
+export const latOf = y => 90 - ((y + 0.5) / H) * 180;
+export const wrapX = x => ((x % W) + W) % W;
+export const idx = (x, y) => y * W + wrapX(x);
+export const regionOf = (x, y) => Math.floor(y / RH) * RX + Math.floor(wrapX(x) / RW);
+// distance en cellules, corrigée de la latitude et du bouclage
+export function dist(ax, ay, bx, by) {
+  let dx = Math.abs(ax - bx); if (dx > W / 2) dx = W - dx;
+  const c = Math.cos(((ay + by) / 2 / H - 0.5) * Math.PI);
+  return Math.sqrt(dx * dx * c * c + (ay - by) * (ay - by));
+}
 
 // ---------- aléa déterministe ----------
 export function mulberry32(a) {
@@ -44,8 +53,9 @@ export function hashMix(...nums) {
 }
 
 // ---------- terrain ----------
+// bruit de valeur, périodique en x (la grille boucle), `cell` divise W
 function valueNoise(seed, cell) {
-  const gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+  const gw = W / cell, gh = Math.ceil(H / cell) + 2;
   const r = mulberry32(seed);
   const g = new Float64Array(gw * gh);
   for (let i = 0; i < g.length; i++) g[i] = r();
@@ -54,59 +64,62 @@ function valueNoise(seed, cell) {
     const gy = y / cell, iy = Math.floor(gy), fy = gy - iy, sy = fy * fy * (3 - 2 * fy);
     for (let x = 0; x < W; x++) {
       const gx = x / cell, ix = Math.floor(gx), fx = gx - ix, sx = fx * fx * (3 - 2 * fx);
-      const a = g[iy * gw + ix], b = g[iy * gw + ix + 1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix + 1];
-      out[y * W + x] = (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
+      const ix1 = (ix + 1) % gw;
+      const a = g[iy * gw + ix], b = g[iy * gw + ix1], c = g[(iy + 1) * gw + ix], d = g[(iy + 1) * gw + ix1];
+      const top = a + (b - a) * sx, bot = c + (d - c) * sx;
+      out[y * W + x] = top + (bot - top) * sy;
     }
   }
   return out;
 }
 
-// type : 0 mer profonde · 1 haut-fond · 2 plaine · 3 collines · 4 montagne
+// type : 0 mer profonde · 1 haut-fond · 2 plaine · 3 collines · 4 montagne · 5 glace
 export function makeTerrain(seed) {
   const h = new Float64Array(W * H);
-  const oct = [[56, 1], [28, 0.5], [14, 0.25], [7, 0.125], [3.5, 0.06]];
+  const oct = [[96, 1], [48, 0.5], [24, 0.25], [12, 0.125], [6, 0.06]];
   let amp = 0;
   oct.forEach(([c, a], i) => { const n = valueNoise(seed + i * 7919, c); for (let k = 0; k < h.length; k++) h[k] += n[k] * a; amp += a; });
-  const moist = valueNoise(seed + 101, 22);
+  const moist = valueNoise(seed + 101, 32);
   const type = new Uint8Array(W * H), fert = new Uint8Array(W * H), coast = new Uint8Array(W * H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const k = y * W + x;
-    const dx = (x / W - 0.5) * 2, dy = (y / H - 0.5) * 2 * 0.9;
-    const d = dx * dx + dy * dy;
-    let v = h[k] / amp - Math.max(0, d - 0.45) * 0.5;
-    h[k] = v;
-    type[k] = v < 0.355 ? 0 : v < 0.41 ? 1 : v < 0.72 ? 2 : v < 0.82 ? 3 : 4;
-  }
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const k = y * W + x, t = type[k];
-    if (t >= 2) {
-      const sea = (x > 0 && type[k - 1] < 2) || (x < W - 1 && type[k + 1] < 2) || (y > 0 && type[k - W] < 2) || (y < H - 1 && type[k + W] < 2);
-      coast[k] = sea ? 1 : 0;
+  for (let y = 0; y < H; y++) {
+    const lat = latOf(y), al = Math.abs(lat);
+    for (let x = 0; x < W; x++) {
+      const k = y * W + x;
+      let v = h[k] / amp;
+      v -= Math.max(0, al - 62) * 0.004;                   // les hautes latitudes s'enfoncent
+      h[k] = v;
+      let t = v < 0.355 ? 0 : v < 0.41 ? 1 : v < 0.72 ? 2 : v < 0.82 ? 3 : 4;
+      if (al > 74 || (al > 66 && t >= 2 && v > 0.5)) t = 5;  // calotte
+      type[k] = t;
     }
-    let f = 0;
-    if (t === 2) f = 0.4 + ((0.72 - h[k]) / 0.31) * 0.12 + moist[k] * 0.4 + (coast[k] ? 0.06 : 0);
-    else if (t === 3) f = 0.2 + moist[k] * 0.3;
-    else if (t === 4) f = 0.04;
-    fert[k] = Math.max(0, Math.min(255, Math.floor(f * 255)));
+  }
+  for (let y = 0; y < H; y++) {
+    const al = Math.abs(latOf(y));
+    const cold = al < 45 ? 1 : Math.max(0, 1 - (al - 45) / 28);
+    const tropic = al < 12 ? 0.85 : 1;
+    for (let x = 0; x < W; x++) {
+      const k = y * W + x, t = type[k];
+      if (t >= 2 && t <= 4) {
+        const sea = type[idx(x - 1, y)] < 2 || type[idx(x + 1, y)] < 2 || (y > 0 && type[k - W] < 2) || (y < H - 1 && type[k + W] < 2);
+        coast[k] = sea ? 1 : 0;
+      }
+      let f = 0;
+      if (t === 2) f = 0.4 + ((0.72 - h[k]) / 0.37) * 0.12 + moist[k] * 0.4 + (coast[k] ? 0.06 : 0);
+      else if (t === 3) f = 0.2 + moist[k] * 0.3;
+      else if (t === 4) f = 0.04;
+      fert[k] = Math.max(0, Math.min(255, Math.floor(f * cold * tropic * 255)));
+    }
   }
   return { h, type, fert, coast };
 }
-
-export const idx = (x, y) => y * W + x;
-export const regionOf = (x, y) => Math.floor(y / RH) * RX + Math.floor(x / RW);
+export const walkable = t => t >= 2 && t <= 4;
 
 // ---------- génome ----------
 export function genome(r) { const g = []; for (let i = 0; i < 8; i++) g.push(Math.floor(r() * 256)); return g; }
 function decode(g) {
   return {
-    hunger: 0.5 + (g[0] / 255) * 3.5,     // seuil nourriture/pop déclenchant le départ
-    settleW: g[1] / 255,                  // attrait de la fertilité
-    aggr: g[2] / 255,                     // agressivité
-    wander: (g[3] / 255) * 0.25,          // errance spontanée
-    foundF: 0.45 + (g[4] / 255) * 0.4,    // fertilité minimale pour fonder
-    splitPop: 36 + Math.floor((g[5] / 255) * 110),
-    coastLove: g[6] / 255,
-    mut: 0.04 + (g[7] / 255) * 0.3,
+    hunger: 0.5 + (g[0] / 255) * 3.5, settleW: g[1] / 255, aggr: g[2] / 255, wander: (g[3] / 255) * 0.25,
+    foundF: 0.45 + (g[4] / 255) * 0.4, splitPop: 36 + Math.floor((g[5] / 255) * 110), coastLove: g[6] / 255, mut: 0.04 + (g[7] / 255) * 0.3,
   };
 }
 function mutate(g, rate, r) {
@@ -115,30 +128,45 @@ function mutate(g, rate, r) {
   return out;
 }
 
-const SYL_A = ['Hol', 'Vik', 'Skar', 'Thor', 'Bjar', 'Hal', 'Ran', 'Grim', 'Eyr', 'Nor', 'Fjal', 'Odd', 'Ulf', 'Ask', 'Hvit', 'Sva'];
-const SYL_B = ['heim', 'vík', 'nes', 'fjörd', 'stad', 'by', 'dal', 'gard', 'ey', 'vang', 'holt', 'mark', 'vatn', 'strönd'];
+const SYL_A = ['Hol', 'Vik', 'Skar', 'Thor', 'Bjar', 'Hal', 'Ran', 'Grim', 'Eyr', 'Nor', 'Fjal', 'Odd', 'Ulf', 'Ask', 'Hvit', 'Sva', 'Kal', 'Ingi', 'Vé', 'Hrafn'];
+const SYL_B = ['heim', 'vík', 'nes', 'fjörd', 'stad', 'by', 'dal', 'gard', 'ey', 'vang', 'holt', 'mark', 'vatn', 'strönd', 'borg', 'sund'];
 function placeName(r) { return SYL_A[Math.floor(r() * SYL_A.length)] + SYL_B[Math.floor(r() * SYL_B.length)]; }
 
 const DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 
+// une route traverse-t-elle la mer ? (échantillonnage du segment, avec bouclage)
+function crossesSea(T, a, b) {
+  let dx = b.x - a.x; if (dx > W / 2) dx -= W; if (dx < -W / 2) dx += W;
+  const n = Math.max(2, Math.ceil(Math.hypot(dx, b.y - a.y)));
+  let sea = 0;
+  for (let i = 1; i < n; i++) { const x = Math.round(a.x + dx * i / n), y = Math.round(a.y + (b.y - a.y) * i / n); if (T.type[idx(x, y)] < 2) sea++; }
+  return sea > n * 0.15;
+}
+// portée des routes : grandit avec l'âge du monde (les civilisations avancent)
+export const routeRange = tick => Math.min(70, 14 + tick / 90);
+
 // ---------- une unité de travail ----------
-// unit = { region, rx, ry, tick, steps, seed, idBase, agents, settlements }
-// Générateur : un `yield` par saison, pour que le navigateur puisse animer.
+// unit = { region, rx, ry, tick, steps, seed, idBase, climate, agents, settlements, routes }
 export function* simulateUnitGen(T, unit) {
   const rand = mulberry32(unit.seed);
   const agents = unit.agents.map(a => ({ ...a, g: a.g.slice() }));
   const settlements = unit.settlements.slice();
-  const newSettlements = [], events = [];
+  const routes = unit.routes.slice();
+  const climate = Math.max(-1, Math.min(1, unit.climate || 0));
+  const yieldK = 1 + 0.45 * climate;                      // abondance / disette
+  const newSettlements = [], newRoutes = [], events = [];
   let nextId = unit.idBase, decisions = 0;
-  // on compte tous les vivants de l'unité, même ceux qui ont migré hors de la région
-  const regionCount = () => agents.reduce((n, a) => n + (a.pop > 0 ? 1 : 0), 0);
+  const linkCount = new Map();
+  for (const r of routes) { linkCount.set(r.a, (linkCount.get(r.a) || 0) + 1); linkCount.set(r.b, (linkCount.get(r.b) || 0) + 1); }
+  const linked = new Set(routes.map(r => r.a < r.b ? r.a + ':' + r.b : r.b + ':' + r.a));
+  const living = () => agents.reduce((n, a) => n + (a.pop > 0 ? 1 : 0), 0);
 
   for (let s = 0; s < unit.steps; s++) {
     const tick = unit.tick + s;
     const occ = new Map();
     for (const a of agents) if (a.pop > 0) { const k = idx(a.x, a.y); (occ.get(k) || occ.set(k, []).get(k)).push(a); }
     const born = [];
-    let count = regionCount();
+    let count = living();
 
     for (const a of agents) {
       if (a.pop <= 0) continue;
@@ -146,24 +174,24 @@ export function* simulateUnitGen(T, unit) {
       const G = decode(a.g);
       const k = idx(a.x, a.y);
       const f = T.fert[k] / 255;
-      let bonus = 1 / (occ.get(k)?.length || 1);   // une terre se partage
-      for (const st of settlements) if (Math.abs(st.x - a.x) <= 1 && Math.abs(st.y - a.y) <= 1) { bonus *= 1.6; break; }
+      let bonus = 1 / (occ.get(k)?.length || 1);
+      for (const st of settlements) if (Math.abs(st.y - a.y) <= 1 && Math.abs(wrapX(st.x - a.x + W / 2) - W / 2) <= 1) { bonus *= 1.6 + 0.12 * Math.min(4, linkCount.get(st.id) || 0); break; }
 
-      // économie : la terre produit, pas les bras — au-delà de la capacité, on meurt de faim
+      // économie : la terre produit, pas les bras
       const cap = 30 + f * 150;
-      a.food += f * 2.0 * bonus * Math.min(a.pop, cap) - a.pop;
+      a.food += f * 2.0 * bonus * yieldK * Math.min(a.pop, cap) - a.pop;
       if (a.food > a.pop * 3 && a.pop < cap * 1.5) { a.pop += Math.floor(a.pop * 0.05) + 1; a.food -= a.pop * 0.5; }
-      if (a.food < 0) { a.pop -= Math.ceil(a.pop * 0.12); a.food = 0; }
+      if (a.food < 0) { a.pop -= Math.ceil(a.pop * (0.12 - 0.04 * climate)); a.food = 0; }
       if (a.pop <= 0) { a.pop = 0; events.push({ kind: 'death', tick, lin: a.lin, x: a.x, y: a.y }); continue; }
       a.food = Math.min(a.food, a.pop * 8);
 
-      // razzia
+      // razzia — plus fréquente quand les temps sont durs
       if (G.aggr > 0.45) {
         for (const [dx, dy] of DIRS) {
           const o = occ.get(idx(a.x + dx, a.y + dy));
           if (!o) continue;
           const v = o.find(b => b.lin !== a.lin && b.pop > 0);
-          if (v && rand() < G.aggr * 0.15) {
+          if (v && rand() < G.aggr * 0.15 * (1 - 0.5 * climate)) {
             const take = Math.floor(v.food * 0.3); v.food -= take; a.food += take; v.pop -= Math.ceil(v.pop * 0.05);
             if (rand() < 0.08) events.push({ kind: 'raid', tick, lin: a.lin, vs: v.lin, x: a.x, y: a.y });
             break;
@@ -174,7 +202,7 @@ export function* simulateUnitGen(T, unit) {
       // fondation
       const hungry = a.food / a.pop < G.hunger;
       if (!hungry && a.stay >= 24 && f >= G.foundF && a.pop >= 28 && rand() < 0.25
-          && !settlements.some(st => Math.abs(st.x - a.x) <= 5 && Math.abs(st.y - a.y) <= 5)) {
+          && !settlements.some(st => dist(st.x, st.y, a.x, a.y) <= 5)) {
         const st = { id: nextId++, x: a.x, y: a.y, lin: a.lin, name: placeName(rand), founded: tick };
         settlements.push(st); newSettlements.push(st);
         events.push({ kind: 'found', tick, lin: a.lin, x: a.x, y: a.y, name: st.name });
@@ -186,10 +214,10 @@ export function* simulateUnitGen(T, unit) {
       if (hungry || rand() < G.wander) {
         let best = -1e9, bx = a.x, by = a.y, bdx = 0, bdy = 0;
         for (const [dx, dy] of DIRS) {
-          const nx = a.x + dx, ny = a.y + dy;
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const nx = wrapX(a.x + dx), ny = a.y + dy;
+          if (ny < 0 || ny >= H) continue;
           const nk = idx(nx, ny);
-          if (T.type[nk] < 2) continue;
+          if (!walkable(T.type[nk])) continue;
           const crowd = (occ.get(nk) || []).length;
           let sc = (T.fert[nk] / 255) * (1 + G.settleW) + (T.coast[nk] ? G.coastLove * 0.3 : 0) - crowd * 0.3 + rand() * 0.2;
           if (hungry) sc += (T.fert[nk] / 255) * 0.6;
@@ -202,12 +230,12 @@ export function* simulateUnitGen(T, unit) {
         } else a.stay++;
       } else a.stay++;
 
-      // scission
-      if (a.pop >= G.splitPop && a.food > a.pop * 1.5 && count < MAX_AGENTS_REGION) {
+      // scission — l'abondance la facilite
+      if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < MAX_AGENTS_REGION) {
         const free = [];
         for (const [dx, dy] of DIRS) {
-          const nx = a.x + dx, ny = a.y + dy;
-          if (nx >= 0 && ny >= 0 && nx < W && ny < H && T.type[idx(nx, ny)] >= 2) free.push([nx, ny, dx, dy]);
+          const nx = wrapX(a.x + dx), ny = a.y + dy;
+          if (ny >= 0 && ny < H && walkable(T.type[idx(nx, ny)])) free.push([nx, ny, dx, dy]);
         }
         if (free.length) {
           const [nx, ny, dx, dy] = free[Math.floor(rand() * free.length)];
@@ -219,9 +247,35 @@ export function* simulateUnitGen(T, unit) {
       }
     }
     for (const b of born) agents.push(b);
+
+    // routes : un comptoir de la région, assez ancien, s'ouvre au plus proche voisin non relié
+    if (s % 8 === 0) {
+      const range = routeRange(tick) * (1 + 0.25 * climate);
+      for (const st of settlements) {
+        if (regionOf(st.x, st.y) !== unit.region || tick - st.founded < 40) continue;
+        if ((linkCount.get(st.id) || 0) >= 4 || rand() > 0.12) continue;
+        let best = null, bd = range;
+        for (const o of settlements) {
+          if (o.id === st.id) continue;
+          const key = st.id < o.id ? st.id + ':' + o.id : o.id + ':' + st.id;
+          if (linked.has(key)) continue;
+          if (o.lin !== st.lin && tick - o.founded < 200) continue;   // le commerce entre lignées vient plus tard
+          const d = dist(st.x, st.y, o.x, o.y);
+          if (d < bd) { bd = d; best = o; }
+        }
+        if (best) {
+          const sea = crossesSea(T, st, best);
+          const r = { a: st.id, b: best.id, lin: st.lin, tick, sea: sea ? 1 : 0 };
+          routes.push(r); newRoutes.push(r);
+          linked.add(st.id < best.id ? st.id + ':' + best.id : best.id + ':' + st.id);
+          linkCount.set(st.id, (linkCount.get(st.id) || 0) + 1); linkCount.set(best.id, (linkCount.get(best.id) || 0) + 1);
+          events.push({ kind: 'route', tick, lin: st.lin, x: st.x, y: st.y, from: st.name, to: best.name, sea: r.sea });
+        }
+      }
+    }
     yield { step: s, agents, decisions };
   }
-  return { region: unit.region, tick: unit.tick, steps: unit.steps, agents: agents.filter(a => a.pop > 0), events, settlements: newSettlements, decisions };
+  return { region: unit.region, tick: unit.tick, steps: unit.steps, agents: agents.filter(a => a.pop > 0), events, settlements: newSettlements, routes: newRoutes, decisions };
 }
 
 export function simulateUnit(T, unit) {
@@ -232,6 +286,7 @@ export function simulateUnit(T, unit) {
 export function hashResult(res) {
   const parts = res.agents.map(a => `${a.id}:${a.x}:${a.y}:${a.pop}:${Math.floor(a.food)}:${a.g.join('.')}`).sort();
   parts.push(...res.settlements.map(s => `S${s.id}:${s.x}:${s.y}:${s.name}`));
+  parts.push(...res.routes.map(r => `R${r.a}:${r.b}:${r.sea}`));
   return hashStr(parts.join('|')).toString(16).padStart(8, '0');
 }
 
@@ -241,37 +296,43 @@ const clone = o => JSON.parse(JSON.stringify(o));
 export class World {
   constructor(state) {
     this.s = state;
+    if (!this.s.routes) this.s.routes = [];
     this.T = makeTerrain(state.seed);
     this.leases = new Map();
+    this.climate = 0; this.market = null;
   }
 
   static create(seed, now = Date.now()) {
     const T = makeTerrain(seed);
     const r = mulberry32(seed ^ 0x9e3779b9);
     const coastal = [];
-    for (let k = 0; k < W * H; k++) if (T.type[k] === 2 && T.coast[k] && T.fert[k] > 150) coastal.push(k);
+    for (let k = 0; k < W * H; k++) {
+      const y = Math.floor(k / W), al = Math.abs(latOf(y));
+      if (T.type[k] === 2 && T.coast[k] && T.fert[k] > 140 && al < 60) coastal.push(k);
+    }
     const agents = [], chosen = [];
-    let minD = 24, tries = 0;
-    while (agents.length < LINEAGES.length && tries++ < 20000) {
-      if (tries % 2000 === 0) minD = Math.max(6, minD - 4);
+    let minD = 40, tries = 0;
+    while (agents.length < LINEAGES.length && tries++ < 40000) {
+      if (tries % 4000 === 0) minD = Math.max(8, minD - 6);
       const k = coastal[Math.floor(r() * coastal.length)];
       const x = k % W, y = Math.floor(k / W);
-      if (chosen.every(([px, py]) => Math.hypot(px - x, py - y) >= minD)) {
+      if (chosen.every(([px, py]) => dist(px, py, x, y) >= minD)) {
         chosen.push([x, y]);
         const lin = agents.length;
         agents.push({ id: lin + 1, x, y, dx: 0, dy: -1, pop: 42, food: 260, g: genome(r), lin, born: 0, stay: 0 });
       }
     }
-    const regions = Array.from({ length: RX * RY }, (_, i) => ({ id: i, tick: 0, units: 0, last: 0 }));
+    const regions = Array.from({ length: NREG }, (_, i) => ({ id: i, tick: 0, units: 0, last: 0 }));
     return new World({
       seed, created: now, lastActivity: now, nextId: 1000,
-      agents, settlements: [], regions,
+      agents, settlements: [], routes: [], regions,
       lineages: LINEAGES.map(([name, hue], i) => ({ id: i, name, hue, dead: null })),
-      chronicle: [{ t: now, tick: 0, kind: 'genesis', text: 'Douze drakkars touchent terre. Le monde commence.', sigil: '—' }],
+      chronicle: [{ t: now, tick: 0, kind: 'genesis', text: 'Seize drakkars touchent terre. Le monde commence.', sigil: '—' }],
       contributors: {}, totals: { units: 0, ticks: 0, decisions: 0 },
     });
   }
 
+  setMarket(m) { this.market = m; this.climate = m ? Math.max(-1, Math.min(1, m.change / 1.5)) : 0; }
   agentsIn(region) { return this.s.agents.filter(a => regionOf(a.x, a.y) === region); }
   get tick() { return Math.min(...this.s.regions.map(r => r.tick)); }
   get year() { const r = this.s.regions; return Math.floor(r.reduce((n, x) => n + x.tick, 0) / r.length / 4); }
@@ -283,7 +344,6 @@ export class World {
       this.addChronicle({ kind: 'freeze', tick: this.tick, text: `Gel de ${days} jour${days > 1 ? 's' : ''}. Aucun témoin.` }, '—', now);
     }
     this.s.lastActivity = now;
-    // les terres vides vieillissent sans calcul : on les aligne sur la région vivante la plus en retard
     const living = this.s.regions.filter(r => this.agentsIn(r.id).length > 0);
     if (living.length) {
       const floor = Math.min(...living.map(r => r.tick));
@@ -299,7 +359,8 @@ export class World {
     const unit = {
       region: reg.id, rx: reg.id % RX, ry: Math.floor(reg.id / RX), tick: reg.tick, steps: STEPS,
       seed: hashMix(this.s.seed, reg.id, reg.tick), idBase: this.s.nextId,
-      agents: clone(agents), settlements: clone(this.s.settlements),
+      climate: Math.round(this.climate * 1000) / 1000,
+      agents: clone(agents), settlements: clone(this.s.settlements), routes: clone(this.s.routes),
     };
     this.s.nextId += 4000;
     this.leases.set(reg.id, { sigil, at: now, tick: reg.tick, ids: agents.map(a => a.id), unit });
@@ -315,20 +376,20 @@ export class World {
     }
     this.leases.delete(result.region);
     const ids = new Set(l.ids);
-    const incoming = result.agents
-      .filter(a => Number.isInteger(a.x) && Number.isInteger(a.y) && a.x >= 0 && a.y >= 0 && a.x < W && a.y < H && a.pop > 0)
-      .map(a => ({ id: a.id, x: a.x, y: a.y, dx: a.dx | 0, dy: a.dy | 0, pop: a.pop | 0, food: Math.floor(a.food), g: a.g.map(v => v | 0), lin: a.lin | 0, born: a.born | 0, stay: a.stay | 0 }));
+    const incoming = (result.agents || [])
+      .filter(a => Number.isInteger(a.x) && Number.isInteger(a.y) && a.y >= 0 && a.y < H && a.pop > 0)
+      .map(a => ({ id: a.id, x: wrapX(a.x), y: a.y, dx: a.dx | 0, dy: a.dy | 0, pop: a.pop | 0, food: Math.floor(a.food), g: a.g.map(v => v | 0), lin: a.lin | 0, born: a.born | 0, stay: a.stay | 0 }));
     this.s.agents = this.s.agents.filter(a => !ids.has(a.id)).concat(incoming);
-    for (const st of result.settlements) this.s.settlements.push({ id: st.id, x: st.x | 0, y: st.y | 0, lin: st.lin | 0, name: String(st.name).slice(0, 24), founded: st.founded | 0, sigil });
+    for (const st of result.settlements || []) this.s.settlements.push({ id: st.id, x: wrapX(st.x | 0), y: st.y | 0, lin: st.lin | 0, name: String(st.name).slice(0, 24), founded: st.founded | 0, sigil });
+    const have = new Set(this.s.settlements.map(s => s.id));
+    for (const r of result.routes || []) if (have.has(r.a) && have.has(r.b)) this.s.routes.push({ a: r.a, b: r.b, lin: r.lin | 0, tick: r.tick | 0, sea: r.sea ? 1 : 0, sigil });
 
     const reg = this.s.regions[result.region];
     reg.tick += STEPS; reg.units++; reg.last = now;
-    // la chronique ne retient que l'essentiel : toutes les fondations, une razzia, un voyage
-    const entries = [];
-    const seen = {};
-    for (const e of result.events.slice(0, 200)) {
+    const entries = [], seen = {};
+    for (const e of (result.events || []).slice(0, 300)) {
       if (e.kind === 'found' && (seen.found = (seen.found || 0) + 1) <= 3) entries.push(this.addChronicle(e, sigil, now));
-      else if ((e.kind === 'raid' || e.kind === 'voyage') && !seen[e.kind]) { seen[e.kind] = 1; entries.push(this.addChronicle(e, sigil, now)); }
+      else if ((e.kind === 'raid' || e.kind === 'voyage' || e.kind === 'route') && !seen[e.kind]) { seen[e.kind] = 1; entries.push(this.addChronicle(e, sigil, now)); }
     }
     for (const L of this.s.lineages) {
       if (!L.dead && !this.s.agents.some(a => a.lin === L.id)) {
@@ -346,10 +407,12 @@ export class World {
   addChronicle(e, sigil, now) {
     const L = i => this.s.lineages[i]?.name ?? '?';
     const an = `An ${Math.floor(e.tick / 4)}`;
+    const where = e.x != null ? ROMAN[regionOf(e.x, e.y)] : '';
     let text = e.text;
     if (e.kind === 'found') text = `${e.name}, fondée par ${L(e.lin)}.`;
-    else if (e.kind === 'raid') text = `${L(e.lin)} razzie ${L(e.vs)}, ${REGION_NAMES[regionOf(e.x, e.y)]}.`;
-    else if (e.kind === 'voyage') text = `${L(e.lin)} longe la côte, ${REGION_NAMES[regionOf(e.x, e.y)]}.`;
+    else if (e.kind === 'raid') text = `${L(e.lin)} razzie ${L(e.vs)}, ${where}.`;
+    else if (e.kind === 'voyage') text = `${L(e.lin)} longe la côte, ${where}.`;
+    else if (e.kind === 'route') text = `${e.sea ? 'Voie maritime' : 'Route'} de ${e.from} à ${e.to}.`;
     else if (e.kind === 'extinction') text = `La lignée ${L(e.lin)} s'éteint.`;
     const entry = { t: now, tick: e.tick, kind: e.kind, lin: e.lin ?? null, x: e.x ?? null, y: e.y ?? null, an, text, sigil };
     this.s.chronicle.push(entry);
@@ -361,9 +424,10 @@ export class World {
     const s = this.s;
     return {
       seed: s.seed, created: s.created, lastActivity: s.lastActivity, tick: this.tick, year: this.year,
-      regions: s.regions, agents: s.agents, settlements: s.settlements, lineages: s.lineages,
+      regions: s.regions, agents: s.agents, settlements: s.settlements, routes: s.routes, lineages: s.lineages,
       chronicle: s.chronicle.slice(-60), totals: s.totals, contributors: Object.keys(s.contributors).length, online,
       leased: [...this.leases.entries()].map(([r, l]) => ({ region: r, sigil: l.sigil })),
+      climate: this.climate, market: this.market,
     };
   }
 }

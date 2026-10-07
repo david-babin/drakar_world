@@ -9,6 +9,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { World, hashStr } from './public/sim.js';
+import { createMarket } from './market.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 8787);
@@ -28,6 +29,12 @@ db.exec(`
 const row = db.prepare('SELECT state FROM world WHERE id = 1').get();
 const world = row ? new World(JSON.parse(row.state)) : World.create(SEED);
 if (!row) console.log(`Monde créé — graine ${SEED}`);
+// ---------- marché → climat ----------
+const market = createMarket(db);
+world.setMarket(market.current);
+market.onChange(m => { world.setMarket(m); broadcast('market', { market: m, climate: world.climate }); });
+market.refresh();
+
 const qSave = db.prepare('INSERT INTO world (id, state, saved_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at');
 const qSnap = db.prepare('INSERT INTO snapshots (taken_at, tick, state) VALUES (?, ?, ?)');
 const qUnit = db.prepare('INSERT INTO units (at, region, tick, sigil, hash, verified, ok, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
@@ -104,6 +111,8 @@ http.createServer(async (req, res) => {
       for (const e of r.entries) broadcast('chronicle', e);
       return json(res, 200, { ok: true, verified: r.verified, tick: world.tick, serverMs: Date.now() - t0 });
     }
+
+    if (url.pathname === '/api/market') return json(res, 200, { current: market.current, climate: world.climate, history: market.history() });
 
     if (url.pathname === '/api/stats') {
       const last = db.prepare('SELECT at, region, tick, sigil, verified, ok, ms FROM units ORDER BY id DESC LIMIT 20').all();
