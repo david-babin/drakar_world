@@ -4,10 +4,18 @@
   "private": true,
   "type": "module",
   "description": "drakar.tech — un monde calculé par ceux qui le regardent",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node --no-warnings --env-file-if-exists=.env server.js",
     "test": "node test/sim.test.mjs",
-    "demo": "node build-demo.mjs"
+    "demo": "node build-demo.mjs",
+    "build:terre": "node tools/build-terre.mjs"
+  },
+  "devDependencies": {
+    "d3-contour": "^4.0.2",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
   }
 }

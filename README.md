@@ -18,12 +18,14 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
 
 - `public/sim.js` — simulation déterministe partagée serveur/navigateur (agents, génome, unités de travail,
   classe `World` : bail / intégration / chronique). Le terrain est chargé, pas généré (`loadTerrain`).
-- `tools/build-terre.py` — fabrique les données Terre, une fois (Python : pillow, numpy, contourpy) :
-  ETOPO1 (altitude, via la rampe de couleurs), Blue Marble (humidité, indice de végétation) et Natural Earth
-  1:50m (côtes). Entrées : `basemap-data` (PyPI) et `world-atlas` (npm). Sorties versionnées dans `public/` :
+- `tools/build-terre.mjs` — fabrique les données Terre, une fois (`npm run build:terre -- --etopo … --bmng …
+  --land …` ; dépendances de dev : jpeg-js, pngjs, d3-contour) : ETOPO1 (altitude, via la rampe de
+  couleurs), Blue Marble (humidité, indice de végétation) et Natural Earth 1:50m (côtes). Entrées :
+  `etopo1.jpg` et `bmng.jpg` du paquet PyPI `basemap-data` (simple zip à ouvrir), `land-50m.json` du paquet
+  npm `world-atlas`. Sorties versionnées dans `public/` :
   `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko), `fond.png` (1536 × 768, type et niveau
   d'altitude, 88 Ko), `cotes.bin` (1 424 arcs, 161 Ko), `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 /
-  4000 m, 203 Ko). Total ~600 Ko, mis en cache par le navigateur.
+  4000 m, 182 Ko). Total ~580 Ko, mis en cache par le navigateur.
 - `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
   `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
 - `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
