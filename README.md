@@ -25,9 +25,11 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
   seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
 - `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
-- `public/index.html` — globe WebGL (projection orthographique dans le shader, terrain en texture),
-  couche vectorielle canvas (groupes, comptoirs, routes en arcs de grand cercle, régions), HUD, chronique,
-  boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer ; rotation lente au repos.
+- `public/index.html` — globe WebGL (projection orthographique dans le shader, terrain en texture 1152 × 576,
+  soit 3× la grille de simulation), couche vectorielle canvas (groupes, comptoirs, routes en arcs de grand
+  cercle, régions), HUD, chronique, boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
+  (confiné au globe : la page ne zoome jamais). Après 6 s sans manipulation, la caméra glisse d'elle-même
+  vers la région en cours de calcul — la vôtre, sinon celle d'un autre témoin.
 
 ### Protocole (WebSocket `/ws`)
 
@@ -64,6 +66,9 @@ au comptoir (max 4).
 - La terre produit, pas les bras : `vivres += fertilité × 2 × min(pop, capacité) − pop`. Une cellule se partage.
 - Un comptoir (fondé après 24 saisons de sédentarité sur une terre fertile) multiplie la production par 1,6.
 - Sphère : grille 384 × 192 bouclée en longitude, 24 régions, pôles gelés, fertilité décroissante au-delà de 45°.
+- Terrain (`terrainField`) : bruit de gradient périodique, fBm continental (5 octaves) + détail de côtes
+  (6 octaves) avec déformation de domaine, crêtes multifractales pour les chaînes de montagnes, intérieur
+  des terres compressé. Calibré à ~29 % de terres émergées, 5–6 continents. Constantes dans `TERRAIN`.
 - Génome 8 octets : seuil de faim, attrait de la fertilité, agressivité, errance, seuil de fondation,
   taille de scission, goût du littoral, taux de mutation. Hérité à la scission, muté.
 - Pas de sélection explicite : ce qui survit se transmet.

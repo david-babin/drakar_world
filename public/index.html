@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>drakar</title>
 <meta name="description" content="Un monde. Il n'avance que si quelqu'un le regarde.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,7 +16,8 @@
 html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
 body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spacing: .02em; }
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-#globe { cursor: grab; } #globe.drag { cursor: grabbing; }
+#globe { cursor: grab; touch-action: none; } #globe.drag { cursor: grabbing; }
+html, body { overscroll-behavior: none; }
 #over { pointer-events: none; }
 #veil { position: fixed; inset: 0; background: var(--bg); pointer-events: none; transition: opacity 2.4s ease; }
 .hud { position: fixed; pointer-events: none; color: var(--dim); line-height: 1.7; }
@@ -95,7 +96,7 @@ const FS = `
 precision highp float;
 varying vec2 v;
 uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate; uniform float time;
-uniform sampler2D tex; uniform vec2 texel;
+uniform sampler2D tex; uniform vec2 texel; uniform float texW;
 const float PI = 3.14159265;
 vec3 colType(float t, float f) {
   if (t < 0.5) return vec3(0.047, 0.078, 0.106);
@@ -129,7 +130,7 @@ void main() {
   // contours : changement de type avec les voisins
   // contours à épaisseur constante (~1.2 px) : on ne colore que la bordure du texel
   vec2 fr = fract(uv / texel);
-  float lw = clamp(1.2 / (R * 6.2832 / 384.0 * max(z, 0.25)), 0.04, 0.5);
+  float lw = clamp(1.1 / (R * 6.2832 / texW * max(z, 0.25)), 0.03, 0.5);
   float tE = typeAt(uv + vec2(texel.x, 0.)), tW = typeAt(uv - vec2(texel.x, 0.));
   float tS = typeAt(uv + vec2(0., texel.y)), tN = typeAt(uv - vec2(0., texel.y));
   float edge = 0.;
@@ -161,15 +162,16 @@ const U = n => gl.getUniformLocation(prog, n);
 const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-function uploadTerrain() {
-  const data = new Uint8Array(W * H * 4);
-  for (let k = 0; k < W * H; k++) { data[k * 4] = T.type[k]; data[k * 4 + 1] = T.fert[k]; data[k * 4 + 2] = T.coast[k] * 255; data[k * 4 + 3] = 255; }
-  gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-  gl.uniform2f(U('texel'), 1 / W, 1 / H);
+function uploadTerrain(G) {
+  const n = G.w * G.h, data = new Uint8Array(n * 4);
+  for (let k = 0; k < n; k++) { data[k * 4] = G.type[k]; data[k * 4 + 1] = G.fert[k]; data[k * 4 + 2] = G.coast[k] * 255; data[k * 4 + 3] = 255; }
+  gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, G.w, G.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  gl.uniform2f(U('texel'), 1 / G.w, 1 / G.h); gl.uniform1f(U('texW'), G.w);
 }
 
 // ---------- caméra ----------
-const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0 };
+const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
+const regionCenter = reg => ({ lon: (((reg % RX) + .5) * RW / W * 360 - 180) * DEG, lat: (90 - (Math.floor(reg / RX) + .5) * RH / H * 180) * DEG });
 let dpr = 1, cw = 0, ch = 0, R = 0, cx = 0, cy = 0;
 function resize() {
   dpr = Math.min(2, devicePixelRatio || 1);
@@ -225,23 +227,32 @@ function strokePath(pts) {
 }
 
 // ---------- interactions ----------
-let drag = null;
-gcv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, lon: cam.lon, lat: cam.lat, t: performance.now() }; cam.vlon = cam.vlat = 0; gcv.classList.add('drag'); gcv.setPointerCapture(e.pointerId); });
+const ptrs = new Map();                        // pointeurs actifs (souris, doigts)
+let drag = null, pinch = null;
+const clampLat = l => Math.max(-80 * DEG, Math.min(80 * DEG, l));
+const zoomTo = z => { cam.zoom = Math.max(0.6, Math.min(5, z)); cam.idle = 0; };
+gcv.addEventListener('pointerdown', e => {
+  gcv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  cam.vlon = cam.vlat = 0; cam.idle = 0;
+  if (ptrs.size === 1) { drag = { x: e.clientX, y: e.clientY, lon: cam.lon, lat: cam.lat }; gcv.classList.add('drag'); }
+  else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: cam.zoom }; drag = null; }
+});
 gcv.addEventListener('pointermove', e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && ptrs.size >= 2) { const [a, b] = [...ptrs.values()]; zoomTo(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d); return; }
   if (drag) {
     const k = 1 / R;
-    const nlon = drag.lon - (e.clientX - drag.x) * k, nlat = Math.max(-80 * DEG, Math.min(80 * DEG, drag.lat + (e.clientY - drag.y) * k));
+    const nlon = drag.lon - (e.clientX - drag.x) * k, nlat = clampLat(drag.lat + (e.clientY - drag.y) * k);
     cam.vlon = (nlon - cam.lon) * 0.5; cam.vlat = (nlat - cam.lat) * 0.5;
     cam.lon = nlon; cam.lat = nlat; cam.idle = 0;
-  } else hoverAt(e.clientX, e.clientY);
+  } else if (ptrs.size === 0) hoverAt(e.clientX, e.clientY);
 });
-const endDrag = () => { drag = null; gcv.classList.remove('drag'); };
-gcv.addEventListener('pointerup', endDrag); gcv.addEventListener('pointercancel', endDrag);
-gcv.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = Math.max(0.6, Math.min(4, cam.zoom * Math.exp(-e.deltaY * 0.0012))); cam.idle = 0; }, { passive: false });
-let pinch = null;
-gcv.addEventListener('touchstart', e => { if (e.touches.length === 2) pinch = { d: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY), z: cam.zoom }; }, { passive: true });
-gcv.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); cam.zoom = Math.max(0.6, Math.min(4, pinch.z * d / pinch.d)); } }, { passive: true });
-gcv.addEventListener('touchend', () => pinch = null);
+const endPtr = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (ptrs.size === 0) { drag = null; gcv.classList.remove('drag'); } else if (ptrs.size === 1 && !drag) { const [p] = [...ptrs.values()]; drag = { x: p.x, y: p.y, lon: cam.lon, lat: cam.lat }; } cam.idle = 0; };
+gcv.addEventListener('pointerup', endPtr); gcv.addEventListener('pointercancel', endPtr);
+// la molette (et le pincement trackpad, qui arrive en ctrl+molette) ne zoome que le globe, jamais la page
+addEventListener('wheel', e => { e.preventDefault(); zoomTo(cam.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0012))); }, { passive: false });
+addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault(); });
+addEventListener('gesturestart', e => e.preventDefault());
 gcv.addEventListener('mouseleave', () => tip.style.display = 'none');
 
 // ---------- rendu ----------
@@ -252,10 +263,21 @@ function frame(now) {
   if (!world) return;
   frames++; if (now - fpsAt > 1000) { tele.fps = frames; frames = 0; fpsAt = now; }
   // inertie et rotation lente au repos
-  if (!drag) {
-    cam.lon += cam.vlon; cam.lat = Math.max(-80 * DEG, Math.min(80 * DEG, cam.lat + cam.vlat));
+  if (!drag && !pinch) {
+    cam.lon += cam.vlon; cam.lat = clampLat(cam.lat + cam.vlat);
     cam.vlon *= 0.92; cam.vlat *= 0.92;
-    cam.idle++; if (cam.idle > 240) cam.lon += 0.00035 * Math.min(1, (cam.idle - 240) / 300);
+    cam.idle++;
+    // après 6 s sans manipulation, la caméra glisse vers la zone en calcul (la mienne, sinon celle d'un autre témoin)
+    if (cam.idle > 360) {
+      let reg = lease ? lease.unit.region : null;
+      if (reg == null) { let best = 0; for (const pr of peers.values()) if (pr.at > best) { best = pr.at; reg = pr.region; } }
+      if (reg != null) cam.target = regionCenter(reg);
+      const ease = Math.min(0.012, (cam.idle - 360) / 20000);
+      if (cam.target) {
+        let dl = cam.target.lon - cam.lon; dl = Math.atan2(Math.sin(dl), Math.cos(dl));
+        cam.lon += dl * ease; cam.lat += (clampLat(cam.target.lat) - cam.lat) * ease;
+      } else cam.lon += 0.00035 * Math.min(1, (cam.idle - 360) / 300);
+    }
   }
   layout();
 
@@ -392,7 +414,7 @@ function addChron(e, isNew) {
 function setWorld(w) {
   const first = !world;
   world = w;
-  if (first) { T = S.makeTerrain(w.seed); uploadTerrain(); chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
+  if (first) { T = S.makeTerrain(w.seed); uploadTerrain(T); setTimeout(() => uploadTerrain(S.makeTerrain(w.seed, 3 * W, 3 * H)), 50); chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
 }
 
 // ---------- boucle de calcul ----------
