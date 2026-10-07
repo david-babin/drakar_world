@@ -55,6 +55,15 @@ Serveur → client : `hello {world, peers}` · `unit {unit, verify}` · `ack` / 
 3. Le serveur intègre, horodate la chronique, diffuse le nouvel état. Une unité sur 7 est recalculée
    côté serveur (déterminisme → même hash, sinon rejet).
 
+### Reprise après veille / coupure
+
+Le serveur envoie un battement toutes les 20 s. Côté client, 45 s sans message = connexion morte : fermeture
+forcée, reconnexion avec backoff (1 → 15 s). Le retour de veille, le retour en ligne, le retour au premier
+plan (`pageshow`, `online`, `focus`, `visibilitychange`) déclenchent une vérification immédiate et remettent
+le backoff à 1 s. Un bail demandé sans réponse pendant 20 s ferme aussi la connexion. Une unité dont le calcul
+a été interrompu plus de 80 s (onglet caché, veille) n'est pas renvoyée : son bail a expiré, la région a été
+réattribuée. Côté serveur, le flux Finnhub muet depuis 3 min est fermé et rouvert.
+
 ### Climat = marché
 
 Le serveur lit la variation de l'indice depuis la clôture précédente (en direct pendant la séance avec
