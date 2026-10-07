@@ -4,7 +4,7 @@
     {
       "label": "drakar: serveur",
       "type": "shell",
-      "command": "node --no-warnings server.js",
+      "command": "node --no-warnings --env-file-if-exists=.env server.js",
       "isBackground": true,
       "problemMatcher": [],
       "group": { "kind": "build", "isDefault": true },

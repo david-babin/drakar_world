@@ -82,6 +82,8 @@ const tele = { cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceM
 // ---------- état ----------
 const DEMO = !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
 let world = null, T = null, online = 1, lease = null;
+const peers = new Map();            // sigil → { region, step, agents: [[id,x,y,lin,pop]], at }
+const PEER_TTL = 6000;
 const chron = document.getElementById('chron');
 const $ = id => document.getElementById(id);
 
@@ -279,7 +281,14 @@ function frame(now) {
     }
     octx.stroke(); octx.setLineDash([]);
   };
-  for (const l of world.leased || []) if (l.sigil !== ME) regionBox(l.region, 'rgba(201,194,178,.22)', [2, 6]);
+  const tnow = Date.now();
+  for (const [sg, pr] of peers) if (tnow - pr.at > PEER_TTL) peers.delete(sg);
+  for (const [sg, pr] of peers) {
+    regionBox(pr.region, 'rgba(201,194,178,.26)', [2, 6]);
+    const rx = pr.region % RX, ry = Math.floor(pr.region / RX);
+    const c = projectLL(((rx + .5) * RW / W * 360 - 180) * DEG, (90 - (ry + .5) * RH / H * 180) * DEG, o);
+    if (c && c.c > 0.2) { octx.font = '300 9px IBM Plex Mono'; octx.fillStyle = `rgba(201,194,178,${0.5 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
+  }
   if (lease) regionBox(lease.unit.region, 'rgba(217,168,92,.6)', [3, 5]);
 
   // routes
@@ -307,7 +316,8 @@ function frame(now) {
   }
 
   // groupes
-  const animated = lease ? new Set(lease.agents.map(a => a.id)) : null;
+  const animated = new Set(lease ? lease.agents.map(a => a.id) : []);
+  for (const pr of peers.values()) for (const a of pr.agents) animated.add(a[0]);
   const drawAgent = (a, alpha) => {
     const p = project(a.x, a.y, o); if (!p) return;
     const r = Math.min(4, 1 + Math.sqrt(a.pop) * .2) * (0.6 + 0.4 * p.c);
@@ -315,7 +325,8 @@ function frame(now) {
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
-  for (const a of world.agents) if (!animated || !animated.has(a.id)) drawAgent(a, .8);
+  for (const a of world.agents) if (!animated.has(a.id)) drawAgent(a, .8);
+  for (const pr of peers.values()) for (const [id, x, y, lin, pop] of pr.agents) if (pop > 0) drawAgent({ id, x, y, lin, pop, food: 0, g: [] }, .9);
   if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
 
   // mémoires : événements récents
@@ -354,7 +365,8 @@ function hud() {
   const b = tele.batt ? `${Math.round(tele.batt.level * 100)}% ${tele.batt.charging ? '⚡' : ''}` : '—';
   const n = tele.net ? `${tele.net.type} ${tele.net.rtt}ms` : '—';
   const m = world.market;
-  const mk = m ? `${m.close.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <i class="${m.change < 0 ? 'dn' : ''}">${m.change >= 0 ? '▲' : '▼'} ${Math.abs(m.change).toFixed(2).replace('.', ',')} %</i>` : '—';
+  const mk = m ? `${m.close.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <i class="${m.change < 0 ? 'dn' : ''}">${m.change >= 0 ? '▲' : '▼'} ${Math.abs(m.change).toFixed(2).replace('.', ',')} %</i>${m.live ? ' · <b>direct</b>' : ''}` : '—';
+  const withPeers = [...peers.entries()].map(([sg, pr]) => `${sg} <i>${ROMAN[pr.region]}</i>`).join(' · ');
   const season = world.climate > 0.25 ? 'abondance' : world.climate < -0.25 ? 'disette' : 'saison ordinaire';
   $('tele').innerHTML =
 `<b>${ME}</b>
@@ -362,7 +374,7 @@ cpu <b>${tele.cores || '?'}</b> · mem <b>${tele.mem ? tele.mem + ' Go' : '?'}</
 batt <b>${b}</b> · net <b>${n}</b>
 <i>${fmt(tele.dps)} déc/s</i> · unités <b>${tele.units}</b> · saisons <b>${fmt(tele.ticks)}</b>
 en ligne <b>${online}</b> · témoins <b>${world.contributors}</b>
-total <b>${fmt(world.totals.decisions)}</b> décisions
+total <b>${fmt(world.totals.decisions)}</b> décisions${withPeers ? '\navec ' + withPeers : ''}
 
 indice ${mk}
 climat <b>${season}</b>${m?.source === 'synthétique' ? ' · <i class="dn">flux simulé</i>' : ''}`;
@@ -385,10 +397,10 @@ function setWorld(w) {
 
 // ---------- boucle de calcul ----------
 const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1.5));
-async function runUnit(unit, verify, onDone) {
+async function runUnit(unit, verify, onDone, onProgress) {
   const gen = S.simulateUnitGen(T, unit);
   lease = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
-  let lastDec = 0, lastT = performance.now();
+  let lastDec = 0, lastT = performance.now(), lastProg = 0;
   await new Promise(resolve => {
     const tickFrame = () => {
       const start = performance.now();
@@ -400,6 +412,7 @@ async function runUnit(unit, verify, onDone) {
       } while (performance.now() - start < budgetMs() && lease.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
+      if (onProgress && !r.done && now - lastProg > 400) { lastProg = now; onProgress(lease.step, lease.agents); }
       if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
     };
     requestAnimationFrame(tickFrame);
@@ -408,22 +421,40 @@ async function runUnit(unit, verify, onDone) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function loopServer() {
-  const es = new EventSource('/api/events');
-  es.addEventListener('world', e => setWorld(JSON.parse(e.data)));
-  es.addEventListener('chronicle', e => addChron(JSON.parse(e.data), true));
-  es.addEventListener('market', e => { const d = JSON.parse(e.data); if (world) { world.market = d.market; world.climate = d.climate; } });
-  for (const ev of ['online', 'hello', 'ping']) es.addEventListener(ev, e => online = JSON.parse(e.data).online);
-  setWorld(await (await fetch('/api/world')).json());
+  let sock = null, backoff = 1000, waiting = null;
+  const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
+  const connect = () => new Promise(resolve => {
+    sock = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
+    sock.onopen = () => { backoff = 1000; send({ t: 'hello', sigil: ME }); };
+    sock.onmessage = ev => {
+      const m = JSON.parse(ev.data);
+      switch (m.t) {
+        case 'hello': online = m.online; setWorld(m.world); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); resolve(); break;
+        case 'world': setWorld(m.world); break;
+        case 'chronicle': addChron(m.entry, true); break;
+        case 'market': if (world) { world.market = m.market; world.climate = m.climate; } break;
+        case 'online': online = m.online; break;
+        case 'lease': peers.set(m.sigil, { region: m.region, step: 0, agents: [], at: Date.now() }); break;
+        case 'progress': { const pr = peers.get(m.sigil) || { region: m.region, agents: [] }; pr.region = m.region; pr.step = m.step; pr.agents = m.agents; pr.at = Date.now(); peers.set(m.sigil, pr); break; }
+        case 'release': peers.delete(m.sigil); break;
+        case 'unit': case 'ack': case 'nack': if (waiting) { const w = waiting; waiting = null; w(m); } break;
+      }
+    };
+    sock.onclose = () => { lease = null; peers.clear(); if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'déconnecté' }); } setTimeout(connect, backoff); backoff = Math.min(15000, backoff * 2); };
+    sock.onerror = () => {};
+  });
+  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'délai' }); } }, 20000); });
+  await connect();
   for (;;) {
     try {
-      const res = await fetch('/api/lease', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sigil: ME }) });
-      if (res.status === 204) { lease = null; await sleep(4000); continue; }
-      const { unit, verify } = await res.json();
+      if (sock?.readyState !== 1) { await sleep(1000); continue; }
+      const m = await ask({ t: 'lease' });
+      if (m.t !== 'unit') { lease = null; await sleep(4000); continue; }
+      const { unit, verify } = m;
       await runUnit(unit, verify, async (result, ms) => {
-        const r = await fetch('/api/result', { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sigil: ME, result, verify, hash: S.hashResult(result), ms: Math.round(ms) }) });
-        if (r.ok) { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
-      });
+        const r = await ask({ t: 'result', result, verify, hash: S.hashResult(result), ms: Math.round(ms) });
+        if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
+      }, (step, agents) => send({ t: 'progress', region: unit.region, step, agents: agents.filter(a => a.pop > 0).map(a => [a.id, a.x, a.y, a.lin, a.pop]) }));
       lease = null;
       await sleep(900 + Math.random() * 1500);
     } catch (e) { lease = null; await sleep(5000); }

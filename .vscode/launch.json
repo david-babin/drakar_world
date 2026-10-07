@@ -8,7 +8,7 @@
       "program": "${workspaceFolder}/server.js",
       "cwd": "${workspaceFolder}",
       "env": { "PORT": "8787" },
-      "runtimeArgs": ["--no-warnings"],
+      "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env"],
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"],
       "serverReadyAction": {
@@ -24,7 +24,7 @@
       "program": "${workspaceFolder}/server.js",
       "cwd": "${workspaceFolder}",
       "env": { "PORT": "8787", "DB": "${workspaceFolder}/monde-dev.db" },
-      "runtimeArgs": ["--no-warnings"],
+      "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env"],
       "console": "integratedTerminal",
       "preLaunchTask": "drakar: effacer monde-dev.db",
       "skipFiles": ["<node_internals>/**"]

@@ -3,3 +3,4 @@ monde.db-*
 node_modules/
 *.log
 .DS_Store
+.env

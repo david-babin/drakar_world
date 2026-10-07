@@ -1,12 +1,12 @@
 {
   "name": "drakar-tech",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "drakar.tech — un monde calculé par ceux qui le regardent",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node --no-warnings server.js",
+    "start": "node --no-warnings --env-file-if-exists=.env server.js",
     "test": "node test/sim.test.mjs",
     "demo": "node build-demo.mjs"
   }
