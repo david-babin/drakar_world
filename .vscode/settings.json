@@ -1,0 +1,6 @@
+{
+  "files.eol": "\n",
+  "editor.tabSize": 2,
+  "files.exclude": { "monde.db*": true, "monde-dev.db*": true },
+  "search.exclude": { "demo.html": true }
+}

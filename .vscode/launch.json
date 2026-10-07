@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "drakar.tech · serveur",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "cwd": "${workspaceFolder}",
+      "env": { "PORT": "8787" },
+      "runtimeArgs": ["--no-warnings"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "serverReadyAction": {
+        "pattern": "http://localhost:([0-9]+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "drakar.tech · serveur (monde neuf)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "cwd": "${workspaceFolder}",
+      "env": { "PORT": "8787", "DB": "${workspaceFolder}/monde-dev.db" },
+      "runtimeArgs": ["--no-warnings"],
+      "console": "integratedTerminal",
+      "preLaunchTask": "drakar: effacer monde-dev.db",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "drakar.tech · test simulation",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test/sim.test.mjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
