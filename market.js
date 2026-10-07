@@ -95,12 +95,14 @@ export function createMarket(db, { every = (FINNHUB_KEY ? 10 : 30) * 60_000, log
   }
 
   // ---- flux temps réel Finnhub ----
-  let ws = null, backoff = 5000, lastNotify = 0, lastTradeAt = 0, pending = null, stopped = false;
+  let ws = null, backoff = 5000, lastNotify = 0, lastTradeAt = 0, lastMsgAt = 0, pending = null, stopped = false;
   function connectLive() {
     if (!FINNHUB_KEY || stopped || typeof WebSocket === 'undefined') return;
     try { ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_KEY}`); } catch (e) { log('marché · websocket impossible : ' + e.message); return; }
-    ws.onopen = () => { backoff = 5000; ws.send(JSON.stringify({ type: 'subscribe', symbol: SYMBOL })); log(`marché · flux ${SYMBOL} connecté`); };
+    lastMsgAt = Date.now();
+    ws.onopen = () => { backoff = 5000; lastMsgAt = Date.now(); ws.send(JSON.stringify({ type: 'subscribe', symbol: SYMBOL })); log(`marché · flux ${SYMBOL} connecté`); };
     ws.onmessage = ev => {
+      lastMsgAt = Date.now();
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type !== 'trade' || !msg.data?.length || !current || !(current.prev > 0)) return;
       const last = msg.data[msg.data.length - 1];
@@ -118,6 +120,8 @@ export function createMarket(db, { every = (FINNHUB_KEY ? 10 : 30) * 60_000, log
     ws.onerror = () => {};
     ws.onclose = () => { ws = null; if (current?.live) { current = { ...current, live: false }; notify(); } if (!stopped) { setTimeout(connectLive, backoff); backoff = Math.min(60_000, backoff * 2); } };
   }
+  // connexion muette (Finnhub envoie des pings régulièrement) : on la ferme, ce qui relance la reconnexion — utile après une veille
+  const deadWatch = setInterval(() => { if (ws && Date.now() - lastMsgAt > 180_000) { log('marché · flux muet, reconnexion'); try { ws.close(); } catch {} } }, 30_000); deadWatch.unref();
   // sans trade depuis 2 min (marché fermé ou flux muet), on cesse de dire « en direct »
   const liveWatch = setInterval(() => { if (current?.live && Date.now() - lastTradeAt > 120_000) { current = { ...current, live: false }; notify(); } }, 30_000); liveWatch.unref();
 
@@ -130,6 +134,6 @@ export function createMarket(db, { every = (FINNHUB_KEY ? 10 : 30) * 60_000, log
     history: () => qHist.all(),
     refresh,
     onChange: f => listeners.add(f),
-    stop: () => { stopped = true; clearInterval(timer); clearInterval(liveWatch); try { ws?.close(); } catch {} },
+    stop: () => { stopped = true; clearInterval(timer); clearInterval(liveWatch); clearInterval(deadWatch); try { ws?.close(); } catch {} },
   };
 }

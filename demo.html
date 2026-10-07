@@ -479,7 +479,7 @@ const tele = { cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceM
 
 // ---------- état ----------
 const DEMO = !!window.DRAKAR_DATA || !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
-let world = null, T = null, online = 1, lease = null;
+let world = null, T = null, online = 1, lease = null, link = 'ok';
 const peers = new Map();            // sigil → { region, step, agents: [[id,x,y,lin,pop]], at }
 const PEER_TTL = 6000;
 const chron = document.getElementById('chron');
@@ -907,7 +907,7 @@ climat <b>${season}</b>${m?.source === 'synthétique' ? ' · <i class="dn">flux 
   let st = '';
   if (lease) st = `calcul · région <i>${ROMAN[lease.unit.region]}</i><span class="bar"><i style="width:${(100 * lease.step / STEPS) | 0}%"></i></span>`;
   else if (DEMO) st = `mode démo · monde local`;
-  else st = `synchronisation`;
+  else st = link === 'ok' ? `synchronisation` : link;
   $('status').innerHTML = st;
 }
 function addChron(e, isNew) {
@@ -948,37 +948,61 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function loopServer() {
   const A = await loadAssets(); T = S.loadTerrain(A.terre);
-  let sock = null, backoff = 1000, waiting = null;
+  // Reprise : le serveur envoie un battement toutes les 20 s. Sans message depuis 45 s, la connexion est
+  // considérée morte (veille, Wi-Fi coupé…) et fermée de force, ce qui déclenche la reconnexion. Le retour
+  // de veille, le retour en ligne et le retour au premier plan forcent une vérification immédiate.
+  let sock = null, backoff = 1000, waiting = null, lastMsgAt = 0, reconnectTimer = null, firstHello = null;
   const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
-  const connect = () => new Promise(resolve => {
+  const connect = () => {
+    reconnectTimer = null;
+    if (sock && sock.readyState < 2) return;
     sock = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
+    lastMsgAt = Date.now(); link = 'connexion';
     sock.onopen = () => { backoff = 1000; send({ t: 'hello', sigil: ME }); };
     sock.onmessage = ev => {
+      lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
       switch (m.t) {
-        case 'hello': online = m.online; setWorld(m.world); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); resolve(); break;
+        case 'hello': link = 'ok'; online = m.online; setWorld(m.world); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
         case 'world': setWorld(m.world); break;
         case 'chronicle': addChron(m.entry, true); break;
         case 'market': if (world) { world.market = m.market; world.climate = m.climate; } break;
-        case 'online': online = m.online; break;
+        case 'online': case 'tick': online = m.online; break;
         case 'lease': peers.set(m.sigil, { region: m.region, step: 0, agents: [], at: Date.now() }); break;
         case 'progress': { const pr = peers.get(m.sigil) || { region: m.region, agents: [] }; pr.region = m.region; pr.step = m.step; pr.agents = m.agents; pr.at = Date.now(); peers.set(m.sigil, pr); break; }
         case 'release': peers.delete(m.sigil); break;
         case 'unit': case 'ack': case 'nack': if (waiting) { const w = waiting; waiting = null; w(m); } break;
       }
     };
-    sock.onclose = () => { lease = null; peers.clear(); if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'déconnecté' }); } setTimeout(connect, backoff); backoff = Math.min(15000, backoff * 2); };
+    sock.onclose = () => {
+      link = 'reconnexion'; lease = null; peers.clear();
+      if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'déconnecté' }); }
+      if (!reconnectTimer) reconnectTimer = setTimeout(connect, backoff);
+      backoff = Math.min(15000, backoff * 2);
+    };
     sock.onerror = () => {};
-  });
-  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'délai' }); } }, 20000); });
-  await connect();
+  };
+  const dropSocket = () => { try { sock?.close(); } catch {} };
+  // vérification immédiate au réveil : reconnexion sans attendre le backoff
+  const kick = () => {
+    backoff = 1000;
+    if (!sock || sock.readyState >= 2) { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } connect(); return; }
+    if (sock.readyState === 1 && Date.now() - lastMsgAt > 30000) dropSocket();     // ouvert en apparence, muet depuis trop longtemps
+  };
+  setInterval(() => { if (sock?.readyState === 1 && Date.now() - lastMsgAt > 45000) dropSocket(); }, 5000);
+  addEventListener('online', kick); addEventListener('pageshow', kick); addEventListener('focus', kick);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
+  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'délai' }); dropSocket(); } }, 20000); });
+  await new Promise(r => { firstHello = r; connect(); });
   for (;;) {
     try {
-      if (sock?.readyState !== 1) { await sleep(1000); continue; }
+      if (sock?.readyState !== 1 || link !== 'ok') { await sleep(1000); continue; }
       const m = await ask({ t: 'lease' });
       if (m.t !== 'unit') { lease = null; await sleep(4000); continue; }
       const { unit, verify } = m;
+      const started = Date.now();
       await runUnit(unit, verify, async (result, ms) => {
+        if (Date.now() - started > 80000) return;        // calcul interrompu trop longtemps (onglet caché, veille) : le bail a expiré, on n'envoie rien
         const r = await ask({ t: 'result', result, verify, hash: S.hashResult(result), ms: Math.round(ms) });
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send({ t: 'progress', region: unit.region, step, agents: agents.filter(a => a.pop > 0).map(a => [a.id, a.x, a.y, a.lin, a.pop]) }));

@@ -128,6 +128,9 @@ const hub = attachWebSocket(server, '/ws', ws => {
   });
 });
 
+// battement : les clients s'en servent pour détecter une connexion morte (veille, réseau coupé)
+setInterval(() => hub.broadcast({ t: 'tick', online: hub.size, t: Date.now() }), 20_000).unref();
+
 // ---------- marché → climat ----------
 const regime = c => (c > 0.25 ? 'abondance' : c < -0.25 ? 'disette' : 'ordinaire');
 const market = createMarket(db);
