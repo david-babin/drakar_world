@@ -278,37 +278,53 @@ function cameraMatrix() {
 // lecteur varint : entiers non signés 7 bits par octet, signés en zigzag
 function varReader(buf) {
   const u8 = new Uint8Array(buf); let o = 0;
-  const u = () => { let v = 0, sh = 0; for (;;) { const b = u8[o++]; v |= (b & 0x7f) << sh; if (b < 0x80) return v >>> 0; sh += 7; } };
+  // bornes vérifiées : un fichier corrompu ou d'un autre format lève une erreur au lieu de geler la page
+  const u = () => { let v = 0, sh = 0; for (;;) { if (o >= u8.length || sh > 28) throw new Error('données Terre illisibles'); const b = u8[o++]; v |= (b & 0x7f) << sh; if (b < 0x80) return v >>> 0; sh += 7; } };
   return { u, s: () => { const v = u(); return (v & 1) ? -((v + 1) >>> 1) : v >>> 1; } };
 }
 function parseLines(buf, withLevel) {
   const r = varReader(buf), n = r.u(), out = [];
+  if (n > 100000) throw new Error('données Terre illisibles');
   for (let i = 0; i < n; i++) {
     const level = withLevel ? r.u() : 0, m = r.u();
+    if (m > 65536) throw new Error('données Terre illisibles');
     const x = new Float32Array(m), y = new Float32Array(m), z = new Float32Array(m);
     let px = 0, py = 0;
-    for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); const lo = px / 100 * DEG, la = py / 100 * DEG, cl = Math.cos(la); x[j] = cl * Math.cos(lo); y[j] = cl * Math.sin(lo); z[j] = Math.sin(la); }
+    for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); if (py > 9000 || py < -9000 || px > 18000 || px < -18000) throw new Error('données Terre illisibles'); const lo = px / 100 * DEG, la = py / 100 * DEG, cl = Math.cos(la); x[j] = cl * Math.cos(lo); y[j] = cl * Math.sin(lo); z[j] = Math.sin(la); }
     out.push({ level, n: m, x, y, z });
   }
   return out;
 }
 function parseRings(buf) {
   const r = varReader(buf), n = r.u(), out = [];
-  for (let i = 0; i < n; i++) { const m = r.u(), ring = new Float32Array(m * 2); let px = 0, py = 0; for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); ring[2 * j] = px / 60; ring[2 * j + 1] = py / 60; } out.push(ring); }
+  if (n > 100000) throw new Error('données Terre illisibles');
+  for (let i = 0; i < n; i++) { const m = r.u(); if (m > 1 << 20) throw new Error('données Terre illisibles'); const ring = new Float32Array(m * 2); let px = 0, py = 0; for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); if (py > 5400 || py < -5400 || px > 32400 || px < -21600) throw new Error('données Terre illisibles'); ring[2 * j] = px / 60; ring[2 * j + 1] = py / 60; } out.push(ring); }
   return out;
 }
 const b64 = s => { const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
+const ASSETS = /*__ASSETS__*/null;                    // empreintes injectées par le serveur : URL versionnées, jamais de vieux cache
+const assetUrl = name => '/' + name + (ASSETS?.[name] ? '?v=' + ASSETS[name] : '');
+// si les données lues sont illisibles (cache d'une version antérieure, transfert tronqué…), second essai en ignorant le cache
 async function loadAssets() {
+  try { return await loadAssetsOnce(false); }
+  catch (e) { console.warn('données Terre : second essai sans cache —', e.message); return await loadAssetsOnce(true); }
+}
+async function loadAssetsOnce(reload) {
   const E = window.DRAKAR_DATA;                        // version autonome (demo.html) : données inlinées
-  const get = async (name) => E ? b64(E[name]) : await (await fetch('/' + name)).arrayBuffer();
+  const get = async (name) => {
+    if (E) return b64(E[name]);
+    const r = await fetch(assetUrl(name), reload ? { cache: 'reload' } : ASSETS?.[name] ? {} : { cache: 'no-cache' });
+    if (!r.ok) throw new Error(name + ' : HTTP ' + r.status);
+    return r.arrayBuffer();
+  };
   const [terre, terres, cotes, niveaux] = await Promise.all([get('terre.bin'), get('terres.bin'), get('cotes.bin'), get('niveaux.bin')]);
-  const img = new Image(); img.src = E ? 'data:image/png;base64,' + E['fond.png'] : '/fond.png';
+  const img = new Image(); img.src = E ? 'data:image/png;base64,' + E['fond.png'] : assetUrl('fond.png') + (reload ? (ASSETS?.['fond.png'] ? '&' : '?') + 'r=' + Date.now() : '');
   await img.decode();
+  const rings = parseRings(terres), niv = parseLines(niveaux, true), cot = parseLines(cotes, false);   // tout est validé avant de toucher au GPU
   uploadFond(img);
-  buildMask(parseRings(terres));
-  const niv = parseLines(niveaux, true);
+  buildMask(rings);
   for (let lv = 0; lv < 5; lv++) addLines(niv.filter(L => L.level === lv), [0.79, 0.76, 0.70, 0.10 + lv * 0.05], 0.8);
-  addLines(parseLines(cotes, false), [0.79, 0.76, 0.70, 0.55], 1.2);
+  addLines(cot, [0.79, 0.76, 0.70, 0.55], 1.2);
   return { terre };
 }
 

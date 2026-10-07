@@ -56,23 +56,32 @@ const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 // Le png est déjà compressé ; tout le reste (html, js, svg, manifeste, et surtout les .bin) y gagne 2 à 10×.
 const PUBLIC = path.join(__dirname, 'public');
 const statics = new Map();
+// Données Terre servies par URL versionnée (?v=empreinte) : cache « immutable » d'un an, et un fichier modifié
+// change d'URL — un vieux cache ne peut plus jamais être lu par un code récent. L'index reçoit la table des empreintes.
+const VERSIONED = ['terre.bin', 'terres.bin', 'cotes.bin', 'niveaux.bin', 'fond.png'];
 function loadStatic(rel) {
   const file = path.join(PUBLIC, rel);
   if (!file.startsWith(PUBLIC + path.sep) && file !== PUBLIC) return null;
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return null;
-  const raw = fs.readFileSync(file), ext = path.extname(file), compressible = ext !== '.png' && ext !== '.woff2';
+  let raw = fs.readFileSync(file);
+  const ext = path.extname(file), compressible = ext !== '.png' && ext !== '.woff2';
+  if (rel === 'index.html') {
+    const assets = Object.fromEntries(VERSIONED.map(n => [n, statics.get(n)?.etag.slice(1, -1) || '']));
+    raw = Buffer.from(raw.toString('utf8').replace('/*__ASSETS__*/null', JSON.stringify(assets)));
+  }
   const entry = {
     raw, type: MIME[ext] || 'application/octet-stream', etag: '"' + createHash('sha1').update(raw).digest('base64url').slice(0, 16) + '"',
-    cache: ['.png', '.svg', '.bin', '.woff2'].includes(ext) ? 'public, max-age=86400, stale-while-revalidate=604800' : 'no-cache',
+    cache: ['.png', '.svg', '.woff2'].includes(ext) && !VERSIONED.includes(rel) ? 'public, max-age=86400' : 'no-cache',   // sans version : toujours revalidé (304 bon marché)
     br: compressible ? zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }) : null,
     gz: compressible ? zlib.gzipSync(raw, { level: 9 }) : null,
   };
   statics.set(rel, entry);
   return entry;
 }
-for (const rel of fs.readdirSync(PUBLIC, { recursive: true })) { const f = path.join(PUBLIC, rel); if (fs.statSync(f).isFile()) loadStatic(rel); }
+for (const rel of fs.readdirSync(PUBLIC, { recursive: true })) { const f = path.join(PUBLIC, rel); if (fs.statSync(f).isFile() && rel !== 'index.html') loadStatic(rel); }
+loadStatic('index.html');            // en dernier : il embarque les empreintes
 console.log(`statique : ${statics.size} fichiers, ${[...statics.values()].reduce((n, e) => n + e.raw.length, 0) >> 10} ko bruts, ${[...statics.values()].reduce((n, e) => n + (e.br || e.raw).length, 0) >> 10} ko en brotli`);
-if (process.env.NODE_ENV !== 'production') fs.watch(PUBLIC, { recursive: true }, (_, name) => { if (name) { statics.delete(name); try { loadStatic(name); } catch {} } });   // dev : rechargement à chaud
+if (process.env.NODE_ENV !== 'production') fs.watch(PUBLIC, { recursive: true }, (_, name) => { if (name) { statics.delete(name); try { loadStatic(name); if (VERSIONED.includes(name)) loadStatic('index.html'); } catch {} } });   // dev : rechargement à chaud
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -88,11 +97,12 @@ const server = http.createServer((req, res) => {
     p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
     const e = statics.get(p) || (process.env.NODE_ENV !== 'production' ? loadStatic(p) : null);
     if (!e) { res.writeHead(404); return res.end('404'); }
-    if (req.headers['if-none-match'] === e.etag) { res.writeHead(304, { etag: e.etag, 'cache-control': e.cache }); return res.end(); }
+    const cache = url.searchParams.get('v') === e.etag.slice(1, -1) ? 'public, max-age=31536000, immutable' : e.cache;
+    if (req.headers['if-none-match'] === e.etag) { res.writeHead(304, { etag: e.etag, 'cache-control': cache }); return res.end(); }
     const ae = req.headers['accept-encoding'] || '';
     const enc = e.br && /\bbr\b/.test(ae) ? 'br' : e.gz && /\bgzip\b/.test(ae) ? 'gzip' : null;
     const body = enc === 'br' ? e.br : enc === 'gzip' ? e.gz : e.raw;
-    const headers = { 'content-type': e.type, 'content-length': body.length, 'cache-control': e.cache, etag: e.etag, vary: 'Accept-Encoding' };
+    const headers = { 'content-type': e.type, 'content-length': body.length, 'cache-control': cache, etag: e.etag, vary: 'Accept-Encoding' };
     if (enc) headers['content-encoding'] = enc;
     res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : body);
