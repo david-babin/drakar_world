@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { World, hashStr, loadTerrain } from './public/sim.js';
+import { createHash } from 'node:crypto';
+import zlib from 'node:zlib';
+import { World, hashStr, loadTerrain, packUnit, unpackResult, packEntry } from './public/sim.js';
 import { createMarket } from './market.js';
 import { attachWebSocket } from './ws-mini.js';
 
@@ -47,8 +49,30 @@ setInterval(save, 5000).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { save(true); market.stop(); db.close(); process.exit(0); });
 
 // ---------- HTTP (statique + API de lecture) ----------
-const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
+const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.bin': 'application/octet-stream' };
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
+
+// Le statique est lu une fois, précompressé en brotli et gzip (zlib intégré), servi avec ETag → 304.
+// Le png est déjà compressé ; tout le reste (html, js, svg, manifeste, et surtout les .bin) y gagne 2 à 10×.
+const PUBLIC = path.join(__dirname, 'public');
+const statics = new Map();
+function loadStatic(rel) {
+  const file = path.join(PUBLIC, rel);
+  if (!file.startsWith(PUBLIC + path.sep) && file !== PUBLIC) return null;
+  if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return null;
+  const raw = fs.readFileSync(file), ext = path.extname(file), compressible = ext !== '.png' && ext !== '.woff2';
+  const entry = {
+    raw, type: MIME[ext] || 'application/octet-stream', etag: '"' + createHash('sha1').update(raw).digest('base64url').slice(0, 16) + '"',
+    cache: ['.png', '.svg', '.bin', '.woff2'].includes(ext) ? 'public, max-age=86400, stale-while-revalidate=604800' : 'no-cache',
+    br: compressible ? zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }) : null,
+    gz: compressible ? zlib.gzipSync(raw, { level: 9 }) : null,
+  };
+  statics.set(rel, entry);
+  return entry;
+}
+for (const rel of fs.readdirSync(PUBLIC, { recursive: true })) { const f = path.join(PUBLIC, rel); if (fs.statSync(f).isFile()) loadStatic(rel); }
+console.log(`statique : ${statics.size} fichiers, ${[...statics.values()].reduce((n, e) => n + e.raw.length, 0) >> 10} ko bruts, ${[...statics.values()].reduce((n, e) => n + (e.br || e.raw).length, 0) >> 10} ko en brotli`);
+if (process.env.NODE_ENV !== 'production') fs.watch(PUBLIC, { recursive: true }, (_, name) => { if (name) { statics.delete(name); try { loadStatic(name); } catch {} } });   // dev : rechargement à chaud
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -57,15 +81,21 @@ const server = http.createServer((req, res) => {
     if (url.pathname === '/api/market') return json(res, 200, { symbol: market.symbol, current: market.current, climate: world.climate, history: market.history() });
     if (url.pathname === '/api/stats') {
       const last = db.prepare('SELECT at, region, tick, sigil, verified, ok, ms, climate FROM units ORDER BY id DESC LIMIT 20').all();
-      return json(res, 200, { totals: world.s.totals, contributors: world.s.contributors, online: hub.size, peers: [...peers.values()].map(p => ({ sigil: p.sigil, region: p.region, step: p.step })), last });
+      const ws = [...hub.clients].map(c => ({ sent: c.sent, received: c.received, deflate: c.deflate }));
+      return json(res, 200, { totals: world.s.totals, contributors: world.s.contributors, online: hub.size, seq: world.seq, peers: [...peers.values()].map(p => ({ sigil: p.sigil, region: p.region, step: p.step })), ws, last });
     }
-    let p = url.pathname === '/' ? '/index.html' : url.pathname;
+    let p = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
-    const file = path.join(__dirname, 'public', p);
-    if (!file.startsWith(path.join(__dirname, 'public')) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('404'); }
-    const ext = path.extname(file), longLived = ['.png', '.svg', '.bin', '.woff2'].includes(ext);
-    res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': longLived ? 'public, max-age=86400' : 'no-cache' });
-    fs.createReadStream(file).pipe(res);
+    const e = statics.get(p) || (process.env.NODE_ENV !== 'production' ? loadStatic(p) : null);
+    if (!e) { res.writeHead(404); return res.end('404'); }
+    if (req.headers['if-none-match'] === e.etag) { res.writeHead(304, { etag: e.etag, 'cache-control': e.cache }); return res.end(); }
+    const ae = req.headers['accept-encoding'] || '';
+    const enc = e.br && /\bbr\b/.test(ae) ? 'br' : e.gz && /\bgzip\b/.test(ae) ? 'gzip' : null;
+    const body = enc === 'br' ? e.br : enc === 'gzip' ? e.gz : e.raw;
+    const headers = { 'content-type': e.type, 'content-length': body.length, 'cache-control': e.cache, etag: e.etag, vary: 'Accept-Encoding' };
+    if (enc) headers['content-encoding'] = enc;
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
   } catch (e) { console.error(e); json(res, 500, { error: String(e.message || e) }); }
 });
 
@@ -99,26 +129,30 @@ const hub = attachWebSocket(server, '/ws', ws => {
         const unit = world.lease(me.sigil);
         if (!unit) return ws.send({ t: 'nack', reason: 'aucune région libre' });
         dirty = true; me.region = unit.region; me.step = 0; me.at = Date.now();
-        ws.send({ t: 'unit', unit, verify: (++unitCounter % VERIFY_EVERY) === 0 });
+        ws.send({ t: 'unit', unit: packUnit(unit), verify: (++unitCounter % VERIFY_EVERY) === 0 });
         hub.broadcast({ t: 'lease', region: unit.region, sigil: me.sigil }, ws);
       }
       else if (m.t === 'progress') {
         if (me.region == null || (m.region | 0) !== me.region) return;
         me.step = m.step | 0; me.at = Date.now();
-        hub.broadcast({ t: 'progress', sigil: me.sigil, region: me.region, step: me.step, agents: compact(m.agents) }, ws);
+        const out = { t: 'progress', sigil: me.sigil, region: me.region, step: me.step, agents: compact(m.agents) };
+        if (m.full) out.full = 1; if (Array.isArray(m.gone) && m.gone.length) out.gone = m.gone.slice(0, 64).map(v => v | 0);
+        hub.broadcast(out, ws);
       }
+      else if (m.t === 'resync') { ws.send({ t: 'world', world: world.snapshot(hub.size) }); }
       else if (m.t === 'result') {
         if (!me.sigil || !m.result) return;
         const t0 = Date.now();
-        const r = world.integrate(m.result, me.sigil, { verify: !!m.verify });
+        let result; try { result = unpackResult(m.result); } catch { return ws.send({ t: 'nack', reason: 'résultat illisible' }); }
+        const r = world.integrate(result, me.sigil, { verify: !!m.verify });
         qUnit.run(t0, m.result.region ?? -1, m.result.tick ?? -1, me.sigil, String(m.hash || '').slice(0, 16), r.verified ? 1 : 0, r.ok ? 1 : 0, m.ms | 0, world.climate);
         const region = me.region; me.region = null; me.step = 0;
         hub.broadcast({ t: 'release', region, sigil: me.sigil }, ws);
         if (!r.ok) return ws.send({ t: 'nack', reason: r.reason });
         dirty = true;
         ws.send({ t: 'ack', verified: r.verified, tick: world.tick, serverMs: Date.now() - t0 });
-        hub.broadcast({ t: 'world', world: world.snapshot(hub.size) });
-        for (const e of r.entries) hub.broadcast({ t: 'chronicle', entry: e });
+        hub.broadcast({ t: 'delta', ...r.delta });                       // le delta seul, à tous (émetteur compris)
+        for (const e of r.entries) hub.broadcast({ t: 'chronicle', entry: packEntry(e) });
       }
     } catch (e) { console.error('ws', e); }
   });
@@ -145,7 +179,7 @@ market.onChange(m => {
     lastRegime = r;
     const text = r === 'abondance' ? 'Les vents tournent : saison d\'abondance.' : r === 'disette' ? 'Les vents tournent : disette.' : 'Les vents retombent.';
     const e = world.addChronicle({ kind: 'wind', tick: world.tick, text }, '—', Date.now());
-    dirty = true; hub.broadcast({ t: 'chronicle', entry: e });
+    dirty = true; hub.broadcast({ t: 'chronicle', entry: packEntry(e) });
   }
   hub.broadcast({ t: 'market', market: m, climate: world.climate });
 });

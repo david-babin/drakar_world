@@ -274,21 +274,27 @@ function cameraMatrix() {
 }
 
 // ---------- données Terre ----------
-// terre.bin (grille de simulation), fond.png (classes), terres.bin (anneaux, 1/60°), cotes.bin et niveaux.bin (lignes, 1/100°)
+// terre.bin (grille de simulation), fond.png (classes), terres.bin (anneaux, 1/60°), cotes.bin et niveaux.bin (lignes, 1/100°) — delta zigzag-varint
+// lecteur varint : entiers non signés 7 bits par octet, signés en zigzag
+function varReader(buf) {
+  const u8 = new Uint8Array(buf); let o = 0;
+  const u = () => { let v = 0, sh = 0; for (;;) { const b = u8[o++]; v |= (b & 0x7f) << sh; if (b < 0x80) return v >>> 0; sh += 7; } };
+  return { u, s: () => { const v = u(); return (v & 1) ? -((v + 1) >>> 1) : v >>> 1; } };
+}
 function parseLines(buf, withLevel) {
-  const dv = new DataView(buf); const n = dv.getUint32(0, true); let o = 4; const out = [];
+  const r = varReader(buf), n = r.u(), out = [];
   for (let i = 0; i < n; i++) {
-    let level = 0; if (withLevel) { level = dv.getUint8(o); o += 1; }
-    const m = dv.getUint16(o, true); o += 2;
+    const level = withLevel ? r.u() : 0, m = r.u();
     const x = new Float32Array(m), y = new Float32Array(m), z = new Float32Array(m);
-    for (let j = 0; j < m; j++) { const lo = dv.getInt16(o, true) / 100 * DEG, la = dv.getInt16(o + 2, true) / 100 * DEG; const cl = Math.cos(la); x[j] = cl * Math.cos(lo); y[j] = cl * Math.sin(lo); z[j] = Math.sin(la); o += 4; }
+    let px = 0, py = 0;
+    for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); const lo = px / 100 * DEG, la = py / 100 * DEG, cl = Math.cos(la); x[j] = cl * Math.cos(lo); y[j] = cl * Math.sin(lo); z[j] = Math.sin(la); }
     out.push({ level, n: m, x, y, z });
   }
   return out;
 }
 function parseRings(buf) {
-  const dv = new DataView(buf); const n = dv.getUint32(0, true); let o = 4; const out = [];
-  for (let i = 0; i < n; i++) { const m = dv.getUint32(o, true); o += 4; const r = new Float32Array(m * 2); for (let j = 0; j < m; j++) { r[2 * j] = dv.getInt16(o, true) / 60; r[2 * j + 1] = dv.getInt16(o + 2, true) / 60; o += 4; } out.push(r); }
+  const r = varReader(buf), n = r.u(), out = [];
+  for (let i = 0; i < n; i++) { const m = r.u(), ring = new Float32Array(m * 2); let px = 0, py = 0; for (let j = 0; j < m; j++) { px += r.s(); py += r.s(); ring[2 * j] = px / 60; ring[2 * j + 1] = py / 60; } out.push(ring); }
   return out;
 }
 const b64 = s => { const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
@@ -547,6 +553,7 @@ witness.addEventListener('click', () => {
   whisper.classList.add('on'); clearTimeout(whisperTimer); whisperTimer = setTimeout(() => whisper.classList.remove('on'), 3600);
 });
 function addChron(e, isNew) {
+  if (isNew && world) { world.chronicle.push(e); if (world.chronicle.length > 60) world.chronicle.shift(); }   // les anneaux « mémoire » lisent world.chronicle
   const d = document.createElement('div'); if (isNew) d.className = 'new';
   d.innerHTML = `<span class="an">${e.an || 'An ' + Math.floor(e.tick / 4)}</span>${e.text}<em>${e.sigil === ME ? '◆' : e.sigil}</em>`;
   chron.appendChild(d); while (chron.children.length > 14) chron.firstChild.remove();
@@ -574,7 +581,7 @@ async function runUnit(unit, verify, onDone, onProgress) {
       } while (performance.now() - start < budgetMs() && lease.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
-      if (onProgress && !r.done && now - lastProg > 400) { lastProg = now; onProgress(lease.step, lease.agents); }
+      if (onProgress && !r.done && now - lastProg > 500) { lastProg = now; onProgress(lease.step, lease.agents); }
       if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
     };
     requestAnimationFrame(tickFrame);
@@ -582,6 +589,19 @@ async function runUnit(unit, verify, onDone, onProgress) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// progression différentielle : la première trame est complète, les suivantes ne portent que ce qui a changé
+function progressSender(region) {
+  let last = null;
+  return (step, agents, send) => {
+    const now = new Map(); for (const a of agents) if (a.pop > 0) now.set(a.id, [a.id, a.x, a.y, a.lin, a.pop]);
+    if (!last) { last = now; return { t: 'progress', region, step, full: 1, agents: [...now.values()] }; }
+    const changed = [], gone = [];
+    for (const [id, v] of now) { const p = last.get(id); if (!p || p[1] !== v[1] || p[2] !== v[2] || p[4] !== v[4]) changed.push(v); }
+    for (const id of last.keys()) if (!now.has(id)) gone.push(id);
+    last = now;
+    return { t: 'progress', region, step, agents: changed, gone };
+  };
+}
 async function loopServer() {
   const A = await loadAssets(); T = S.loadTerrain(A.terre);
   // Reprise : le serveur envoie un battement toutes les 20 s. Sans message depuis 45 s, la connexion est
@@ -599,13 +619,22 @@ async function loopServer() {
       lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
       switch (m.t) {
-        case 'hello': link = 'ok'; online = m.online; setWorld(m.world); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
-        case 'world': setWorld(m.world); break;
-        case 'chronicle': addChron(m.entry, true); break;
+        case 'hello': link = 'ok'; online = m.online; setWorld(S.unpackSnapshot(m.world)); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
+        case 'world': setWorld(S.unpackSnapshot(m.world)); break;
+        case 'delta':
+          if (!world || m.seq !== world.seq + 1) { send({ t: 'resync' }); break; }     // trou dans la séquence : on redemande l'état
+          S.applyDelta(world, m); break;
+        case 'chronicle': addChron(S.unpackEntry(m.entry), true); break;
         case 'market': if (world) { world.market = m.market; world.climate = m.climate; } break;
         case 'online': case 'tick': online = m.online; break;
         case 'lease': peers.set(m.sigil, { region: m.region, step: 0, agents: [], at: Date.now() }); break;
-        case 'progress': { const pr = peers.get(m.sigil) || { region: m.region, agents: [] }; pr.region = m.region; pr.step = m.step; pr.agents = m.agents; pr.at = Date.now(); peers.set(m.sigil, pr); break; }
+        case 'progress': {
+          const pr = peers.get(m.sigil) || { region: m.region, agents: [], map: new Map() };
+          if (m.full || !pr.map) pr.map = new Map();
+          for (const a of m.agents) pr.map.set(a[0], a);
+          for (const id of m.gone || []) pr.map.delete(id);
+          pr.region = m.region; pr.step = m.step; pr.agents = [...pr.map.values()]; pr.at = Date.now(); peers.set(m.sigil, pr); break;
+        }
         case 'release': peers.delete(m.sigil); break;
         case 'unit': case 'ack': case 'nack': if (waiting) { const w = waiting; waiting = null; w(m); } break;
       }
@@ -635,13 +664,14 @@ async function loopServer() {
       if (sock?.readyState !== 1 || link !== 'ok') { await sleep(1000); continue; }
       const m = await ask({ t: 'lease' });
       if (m.t !== 'unit') { lease = null; await sleep(4000); continue; }
-      const { unit, verify } = m;
+      const unit = S.unpackUnit(m.unit), verify = m.verify;
       const started = Date.now();
+      const prog = progressSender(unit.region);
       await runUnit(unit, verify, async (result, ms) => {
         if (Date.now() - started > 80000) return;        // calcul interrompu trop longtemps (onglet caché, veille) : le bail a expiré, on n'envoie rien
-        const r = await ask({ t: 'result', result, verify, hash: S.hashResult(result), ms: Math.round(ms) });
+        const r = await ask({ t: 'result', result: S.packResult(result), verify, hash: S.hashResult(result), ms: Math.round(ms) });
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
-      }, (step, agents) => send({ t: 'progress', region: unit.region, step, agents: agents.filter(a => a.pop > 0).map(a => [a.id, a.x, a.y, a.lin, a.pop]) }));
+      }, (step, agents) => send(prog(step, agents)));
       lease = null;
       await sleep(900 + Math.random() * 1500);
     } catch (e) { lease = null; await sleep(5000); }
@@ -670,10 +700,10 @@ async function loopDemo() {
   for (const c of w.s.chronicle) c.t = Math.min(c.t, Date.now() - 60000);
   w.setMarket(syntheticMarket(Date.now()));
   online = 1 + Math.floor(Math.random() * 3);
-  setWorld(w.snapshot(online));
+  setWorld(S.unpackSnapshot(JSON.parse(JSON.stringify(w.snapshot(online)))));
   for (;;) {
     const unit = w.lease(ME);
-    await runUnit(unit, false, (result) => { const r = w.integrate(result, ME); tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; setWorld(w.snapshot(online)); for (const e of r.entries) addChron(e, true); });
+    await runUnit(unit, false, (result) => { const r = w.integrate(result, ME); tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; S.applyDelta(world, JSON.parse(JSON.stringify(r.delta))); for (const e of r.entries) addChron(e, true); });
     lease = null;
     await sleep(900 + Math.random() * 1500);
   }

@@ -30,9 +30,9 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   couleurs), Blue Marble (humidité, indice de végétation) et Natural Earth 1:50m (côtes). Entrées :
   `etopo1.jpg` et `bmng.jpg` du paquet PyPI `basemap-data` (simple zip à ouvrir), `land-50m.json` du paquet
   npm `world-atlas`. Sorties versionnées dans `public/` :
-  `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko), `fond.png` (1536 × 768, type et niveau
-  d'altitude, 88 Ko), `terres.bin` (1 419 anneaux déroulés, 163 Ko), `cotes.bin` (1 424 arcs, 161 Ko), `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 /
-  4000 m, 182 Ko). Total ~740 Ko, mis en cache par le navigateur.
+  `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko, 19 en brotli), `fond.png` (768 × 384, classes et
+  niveau d'altitude, 35 Ko), `terres.bin` (1 419 anneaux déroulés, 84 Ko), `cotes.bin` (1 424 arcs, 86 Ko),
+  `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 / 4000 m, 107 Ko). Lignes en delta zigzag-varint.
 - `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
   `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
 - `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
@@ -53,17 +53,35 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
 
 ### Protocole (WebSocket `/ws`)
 
-Client → serveur : `hello {sigil}` · `lease` · `progress {region, step, agents}` (toutes les 400 ms pendant
-le calcul) · `result {result, hash, ms, verify}`.
-Serveur → client : `hello {world, peers}` · `unit {unit, verify}` · `ack` / `nack` · `world` · `chronicle` ·
-`market {market, climate}` · `online` · `lease` / `progress` / `release` (les autres visiteurs).
+Tout le dynamique passe par un WebSocket texte JSON avec `permessage-deflate` (négocié, sans contexte partagé,
+zlib intégré ; `ws-mini.js`). Les objets voyagent en **tableaux positionnels** (`packAgent`, `packSettlement`,
+`packRoute`, `packEntry` dans `sim.js`) et l'état ne circule en entier qu'au `hello` : ensuite, **des deltas**.
+
+Client → serveur : `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (toutes les 500 ms
+pendant le calcul, **différentiel** : seuls les groupes qui ont bougé) · `result {result, hash, ms, verify}`
+(groupes finaux, nouveautés, et seulement les événements que le serveur retient) · `resync` (trou de séquence).
+Serveur → client : `hello {world, peers}` · `unit {unit, verify}` (groupes de la région + comptoirs et routes du
+voisinage à ±80 cellules) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead,
+regions, totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (les autres).
+
+Mesuré sur un monde à l'an 1 400 (300 groupes, 45 comptoirs, 130 routes), compressé : `hello` 8 Ko, `unit`
+1,9 Ko, `result` 0,8 Ko, `delta` 0,9 Ko, progression 1,7 Ko par unité. Soit ~5 Ko par unité (5 s) pour un
+visiteur seul, et ~2,6 Ko par unité des autres reçus par chacun — contre 60 Ko d'état complet par unité avant.
 
 1. Le serveur attribue la région la plus en retard, ses groupes, une graine dérivée de
    (graine monde, région, tick) et le climat du moment. Bail de 90 s.
 2. Le navigateur exécute `simulateUnitGen` en l'animant (~4 s par unité) et diffuse sa progression :
    **les autres visiteurs voient sa région, son pourcentage et ses groupes bouger en direct**.
-3. Le serveur intègre, horodate la chronique, diffuse le nouvel état. Une unité sur 7 est recalculée
-   côté serveur (déterminisme → même hash, sinon rejet).
+3. Le serveur intègre, horodate la chronique, diffuse le delta numéroté. Une unité sur 7 est recalculée
+   côté serveur (déterminisme → même hash, sinon rejet). Un client qui voit un trou de séquence redemande
+   l'état complet.
+
+### Statique
+
+Lu une fois au démarrage, précompressé en **brotli** (q11) et gzip, servi avec `ETag` (304 si inchangé) et
+`Vary: Accept-Encoding`. Première visite ≈ 290 Ko (page 14, sim 8, terre 19, terres 60, côtes 68, niveaux 80,
+fond 35, polices à part) ; visites suivantes ≈ 22 Ko puis des 304. Les fichiers de lignes sont en
+**delta zigzag-varint** (1 à 2 octets par coordonnée). En dev, le dossier est rechargé à chaud.
 
 ### Ce que voit le visiteur
 

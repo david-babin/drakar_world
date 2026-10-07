@@ -8,10 +8,10 @@
 //
 // Sorties (versionnées, dans public/) :
 //   terre.bin    grille de simulation 384×192 : type (0 mer, 1 haut-fond, 2 plaine, 3 collines, 4 montagne, 5 glace) + fertilité
-//   fond.png     1536×768 niveaux de gris : type*32 + niveau d'altitude*2   (remplissage du globe)
-//   terres.bin   anneaux Natural Earth déroulés (lon jusqu'à 540°), int16 1/60°  (remplissage des terres, parité de stencil)
-//   cotes.bin    arcs Natural Earth, int16 centièmes de degré               (côtes vectorielles)
-//   niveaux.bin  courbes de niveau 500/1000/2000/3000/4000 m, int16        (relief vectoriel)
+//   fond.png     768×384 niveaux de gris : type*32 + niveau d'altitude*2    (classes de relief et ombrage)
+//   terres.bin   anneaux Natural Earth déroulés (lon jusqu'à 540°), delta zigzag-varint, 1/60°   (remplissage, parité de stencil)
+//   cotes.bin    arcs Natural Earth, delta zigzag-varint, 1/100°                             (côtes vectorielles)
+//   niveaux.bin  courbes de niveau 500/1000/2000/3000/4000 m, delta zigzag-varint, 1/100°  (relief vectoriel)
 //
 //   npm run build:terre -- --etopo … --bmng … --land …          (dépendances de dev : jpeg-js, pngjs, d3-contour)
 
@@ -160,20 +160,26 @@ function splitAntimeridian(pts) {           // une ligne qui saute de +180 à �
   out.push(cur);
   return out.filter(c => c.length >= 2);
 }
-function packLines(lines, withLevel) {
+// Encodage delta zigzag-varint : chaque point est relatif au précédent (en unités de 1/scale degré),
+// 1 à 2 octets par coordonnée au lieu de 2 fixes, et brotli y gagne encore. Même format pour lignes et anneaux.
+class VarWriter {
+  constructor() { this.parts = []; this.n = 0; }
+  u(v) { for (;;) { if (v < 0x80) { this.parts.push(v); return; } this.parts.push((v & 0x7f) | 0x80); v >>>= 7; } }
+  s(v) { this.u(v >= 0 ? v * 2 : -v * 2 - 1); }
+  bytes() { return Buffer.from(this.parts); }
+}
+function packLines(lines, withLevel, scale = 100) {
   const split = [];
   for (const [level, pts] of lines) for (const part of splitAntimeridian(pts)) split.push([level, part]);
-  let size = 4, n = 0;
-  for (const [, pts] of split) { size += (withLevel ? 1 : 0) + 2 + 4 * pts.length; n += pts.length; }
-  const buf = Buffer.alloc(size); let o = 0;
-  buf.writeUInt32LE(split.length, o); o += 4;
-  const q = (v, lim) => Math.max(-lim, Math.min(lim, Math.round(v * 100)));
+  const w = new VarWriter(); let n = 0;
+  w.u(split.length);
   for (const [level, pts] of split) {
-    if (withLevel) { buf.writeUInt8(level, o); o += 1; }
-    buf.writeUInt16LE(pts.length, o); o += 2;
-    for (const [x, y] of pts) { buf.writeInt16LE(q(x, 18000), o); buf.writeInt16LE(q(y, 9000), o + 2); o += 4; }
+    if (withLevel) w.u(level);
+    w.u(pts.length);
+    let px = 0, py = 0;
+    for (const [x, y] of pts) { const qx = Math.round(x * scale), qy = Math.round(y * scale); w.s(qx - px); w.s(qy - py); px = qx; py = qy; n++; }
   }
-  return [buf, n];
+  return [w.bytes(), n];
 }
 
 // ---------- main ----------
@@ -185,12 +191,19 @@ const latAt = y => 90 - (y + 0.5) / FH * 180;
 const ice = new Uint8Array(FW * FH), meters = new Float32Array(FW * FH);
 for (let y = 0; y < FH; y++) { const lat = latAt(y); for (let x = 0; x < FW; x++) { const k = y * FW + x; ice[k] = land[k] && (lat < -60 || (white[k] && Math.abs(lat) > 58)) ? 1 : 0; meters[k] = land[k] && !ice[k] ? m0[k] : 0; } }
 
-// classes fines → fond.png
-const png = new PNG({ width: FW, height: FH, colorType: 0, inputColorType: 0, bitDepth: 8 });
-for (let k = 0; k < FW * FH; k++) {
-  let cls = land[k] ? (ice[k] ? 5 : meters[k] < 600 ? 2 : meters[k] < 2000 ? 3 : 4) : (shoal[k] ? 1 : 0);
-  const level = Math.max(0, Math.min(15, Math.floor(meters[k] / 500)));
-  png.data[k] = cls * 32 + level * 2;
+// classes → fond.png, en demi-résolution (768×384) : le littoral vient du masque vectoriel, le fond ne porte
+// que plaine / collines / montagne / glace / plateau continental et 16 niveaux d'altitude pour l'ombrage
+const PW = FW / 2, PH = FH / 2;
+const png = new PNG({ width: PW, height: PH, colorType: 0, inputColorType: 0, bitDepth: 8 });
+for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
+  const cnt = [0, 0, 0, 0, 0, 0]; let lv = 0;
+  for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+    const k = (2 * y + dy) * FW + 2 * x + dx;
+    cnt[land[k] ? (ice[k] ? 5 : meters[k] < 600 ? 2 : meters[k] < 2000 ? 3 : 4) : (shoal[k] ? 1 : 0)]++;
+    lv += Math.max(0, Math.min(15, Math.floor(meters[k] / 500)));
+  }
+  let cls = 0, best = -1; for (let c = 0; c < 6; c++) if (cnt[c] > best) { best = cnt[c]; cls = c; }
+  png.data[y * PW + x] = cls * 32 + Math.round(lv / 4) * 2;
 }
 fs.writeFileSync(`${OUT}/fond.png`, PNG.sync.write(png, { colorType: 0, inputColorType: 0, bitDepth: 8 }));
 
@@ -226,10 +239,9 @@ log(`cotes.bin : ${cotes.length} arcs, ${cn} points, ${cb.length >> 10} ko`);
 // terres : anneaux déroulés pour le remplissage par parité (le client les dessine à 0 et −360°)
 {
   const rs = rings.map(r => simplify(r, 0.015)).filter(r => r.length >= 3);
-  let size = 4, n = 0; for (const r of rs) { size += 4 + 4 * r.length; n += r.length; }
-  const buf = Buffer.alloc(size); let o = 0; buf.writeUInt32LE(rs.length, o); o += 4;
-  for (const r of rs) { buf.writeUInt32LE(r.length, o); o += 4; for (const [x, y] of r) { buf.writeInt16LE(Math.round(x * 60), o); buf.writeInt16LE(Math.round(y * 60), o + 2); o += 4; } }
-  fs.writeFileSync(`${OUT}/terres.bin`, buf);
+  const w = new VarWriter(); let n = 0; w.u(rs.length);
+  for (const r of rs) { w.u(r.length); let px = 0, py = 0; for (const [x, y] of r) { const qx = Math.round(x * 60), qy = Math.round(y * 60); w.s(qx - px); w.s(qy - py); px = qx; py = qy; n++; } }
+  const buf = w.bytes(); fs.writeFileSync(`${OUT}/terres.bin`, buf);
   log(`terres.bin : ${rs.length} anneaux, ${n} points, ${buf.length >> 10} ko`);
 }
 
