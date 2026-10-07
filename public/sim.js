@@ -53,99 +53,21 @@ export function hashMix(...nums) {
 }
 
 // ---------- terrain ----------
-// Champ continu sur la sphère (u = longitude ∈ [0,1) bouclée, v = latitude ∈ [0,1]) : bruit de gradient
-// périodique, fBm, déformation de domaine pour les côtes, crêtes pour les chaînes de montagnes.
-// La grille de simulation (W × H) et la texture de rendu (plus fine) échantillonnent le même champ.
-function gradNoise(seed, nx) {
-  const ny = Math.max(2, nx >> 1);
-  const r = mulberry32(seed);
-  const gx = new Float64Array(nx * (ny + 1)), gy = new Float64Array(nx * (ny + 1));
-  for (let i = 0; i < gx.length; i++) { const a = r() * 6.283185307179586; gx[i] = Math.cos(a); gy[i] = Math.sin(a); }
-  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
-  return (u, v) => {
-    const x = u * nx, y = Math.min(v, 0.999999) * ny;
-    let ix = Math.floor(x); const iy = Math.floor(y), fx = x - ix, fy = y - iy;
-    ix = ((ix % nx) + nx) % nx;
-    const ix1 = (ix + 1) % nx, i00 = iy * nx + ix, i10 = iy * nx + ix1, i01 = (iy + 1) * nx + ix, i11 = (iy + 1) * nx + ix1;
-    const d00 = gx[i00] * fx + gy[i00] * fy, d10 = gx[i10] * (fx - 1) + gy[i10] * fy;
-    const d01 = gx[i01] * fx + gy[i01] * (fy - 1), d11 = gx[i11] * (fx - 1) + gy[i11] * (fy - 1);
-    const sx = fade(fx), sy = fade(fy);
-    return (d00 + (d10 - d00) * sx) + ((d01 + (d11 - d01) * sx) - (d00 + (d10 - d00) * sx)) * sy;   // ≈ [-0.7, 0.7]
-  };
-}
-function fbm(seed, base, octaves, gain = 0.5, lac = 2) {
-  const layers = []; let amp = 1, norm = 0;
-  for (let i = 0; i < octaves; i++) { layers.push([gradNoise(seed + i * 7919, Math.round(base * Math.pow(lac, i))), amp]); norm += amp; amp *= gain; }
-  return (u, v) => { let s = 0; for (const [n, a] of layers) s += n(u, v) * a; return s / norm; };
-}
-function ridged(seed, base, octaves) {
-  const layers = []; let amp = 1, norm = 0;
-  for (let i = 0; i < octaves; i++) { layers.push([gradNoise(seed + i * 104729, Math.round(base * Math.pow(2, i))), amp]); norm += amp; amp *= 0.5; }
-  return (u, v) => { let s = 0; for (const [n, a] of layers) { const r = 1 - Math.abs(n(u, v)) * 1.4; s += r * r * a; } return s / norm; };
-}
-
-// Le champ d'altitude normalisé : ~0.5 au niveau de la mer.
-export const TERRAIN = { contBase: 5, contOct: 5, contGain: 0.5, contAmp: 0.95, detBase: 12, detOct: 6, detAmp: 0.6, warp: 0.1, bias: -0.04, ridgeAmp: 0.16, ridgeBase: 7 };
-export function terrainField(seed, P = TERRAIN) {
-  const warpA = fbm(seed + 11, 3, 3), warpB = fbm(seed + 23, 3, 3);
-  const cont = fbm(seed + 1, P.contBase, P.contOct, P.contGain);   // masses continentales
-  const det = fbm(seed + 2, P.detBase, P.detOct, 0.5);              // détail des côtes
-  const ridge = ridged(seed + 3, P.ridgeBase, 4);                    // chaînes de montagnes
-  const belt = fbm(seed + 5, 3, 2);                                  // où les chaînes se forment
-  const moistN = fbm(seed + 101, 5, 3);
-  return {
-    height(u, v) {
-      const wu = u + P.warp * warpA(u, v), wv = v + P.warp * warpB(u, v);
-      const c = cont(wu, wv), d = det(wu, wv);
-      let h = 0.5 + P.bias + P.contAmp * c + P.detAmp * d;
-      const lat = Math.abs(90 - v * 180);
-      h -= Math.max(0, lat - 60) * 0.004;        // les hautes latitudes s'enfoncent
-      if (h > 0.5) h = 0.5 + (h - 0.5) * 0.55;    // l'intérieur des terres reste bas : le relief vient des crêtes
-      const land = Math.max(0, Math.min(1, (h - 0.5) / 0.06));
-      const b = Math.max(0, Math.min(1, (belt(wu, wv) + 0.02) * 5));
-      h += land * b * ridge(wu, wv) * P.ridgeAmp;
-      return h;
-    },
-    moisture(u, v) { return 0.5 + moistN(u, v); },
-  };
-}
-
+// La Terre, réelle : public/terre.bin produit par tools/build-terre.py (ETOPO1 + Blue Marble + Natural Earth).
+// Format : "TERR", largeur et hauteur (uint16 LE), puis W×H types, puis W×H fertilités.
 // type : 0 mer profonde · 1 haut-fond · 2 plaine · 3 collines · 4 montagne · 5 glace
-export const SEA = 0.5, SHOAL = 0.47, HILL = 0.585, PEAK = 0.655;
-export function typeOf(h, lat) {
-  const al = Math.abs(lat);
-  let t = h < SHOAL ? 0 : h < SEA ? 1 : h < HILL ? 2 : h < PEAK ? 3 : 4;
-  if (al > 75 || (al > 66 && t >= 2 && h > SEA + 0.06)) t = 5;
-  return t;
-}
-
-// Grille de types/fertilité à une résolution donnée (W × H par défaut : la grille de simulation).
-export function makeTerrain(seed, w = W, h = H, P) {
-  const F = terrainField(seed, P);
-  const hh = new Float32Array(w * h), type = new Uint8Array(w * h), fert = new Uint8Array(w * h), coast = new Uint8Array(w * h), moist = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) {
-    const v = (y + 0.5) / h, lat = 90 - v * 180;
-    for (let x = 0; x < w; x++) {
-      const u = (x + 0.5) / w, k = y * w + x;
-      hh[k] = F.height(u, v); type[k] = typeOf(hh[k], lat); moist[k] = F.moisture(u, v);
-    }
-  }
+export function loadTerrain(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  if (String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== 'TERR') throw new Error('terre.bin : en-tête invalide');
+  const w = u8[4] | (u8[5] << 8), h = u8[6] | (u8[7] << 8);
+  if (w !== W || h !== H) throw new Error(`terre.bin : ${w}×${h}, attendu ${W}×${H}`);
+  const type = u8.slice(8, 8 + w * h), fert = u8.slice(8 + w * h, 8 + 2 * w * h), coast = new Uint8Array(w * h);
   const at = (x, y) => type[y * w + ((x % w + w) % w)];
-  for (let y = 0; y < h; y++) {
-    const al = Math.abs(90 - ((y + 0.5) / h) * 180);
-    const cold = al < 45 ? 1 : Math.max(0, 1 - (al - 45) / 28);
-    const tropic = al < 12 ? 0.85 : 1;
-    for (let x = 0; x < w; x++) {
-      const k = y * w + x, t = type[k];
-      if (t >= 2 && t <= 4) coast[k] = (at(x - 1, y) < 2 || at(x + 1, y) < 2 || (y > 0 && type[k - w] < 2) || (y < h - 1 && type[k + w] < 2)) ? 1 : 0;
-      let f = 0;
-      if (t === 2) f = 0.42 + ((HILL - hh[k]) / (HILL - SEA)) * 0.12 + Math.max(0, Math.min(1, moist[k])) * 0.4 + (coast[k] ? 0.06 : 0);
-      else if (t === 3) f = 0.2 + Math.max(0, Math.min(1, moist[k])) * 0.3;
-      else if (t === 4) f = 0.04;
-      fert[k] = Math.max(0, Math.min(255, Math.floor(f * cold * tropic * 255)));
-    }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = y * w + x, t = type[k];
+    if (t >= 2 && t <= 4) coast[k] = (at(x - 1, y) < 2 || at(x + 1, y) < 2 || (y > 0 && type[k - w] < 2) || (y < h - 1 && type[k + w] < 2)) ? 1 : 0;
   }
-  return { h: hh, type, fert, coast, w, h };
+  return { type, fert, coast, w, h };
 }
 export const walkable = t => t >= 2 && t <= 4;
 
@@ -329,26 +251,29 @@ export function hashResult(res) {
 const clone = o => JSON.parse(JSON.stringify(o));
 
 export class World {
-  constructor(state) {
+  constructor(state, T) {
     this.s = state;
     if (!this.s.routes) this.s.routes = [];
-    this.T = makeTerrain(state.seed);
+    this.T = T;
     this.leases = new Map();
     this.climate = 0; this.market = null;
   }
 
-  static create(seed, now = Date.now()) {
-    const T = makeTerrain(seed);
+  static create(seed, T, now = Date.now()) {
     const r = mulberry32(seed ^ 0x9e3779b9);
+    // côtes fertiles de vraies masses continentales (pas d'îlots), latitudes tempérées à tropicales
     const coastal = [];
     for (let k = 0; k < W * H; k++) {
-      const y = Math.floor(k / W), al = Math.abs(latOf(y));
-      if (T.type[k] === 2 && T.coast[k] && T.fert[k] > 140 && al < 60) coastal.push(k);
+      const y = Math.floor(k / W), x = k % W, al = Math.abs(latOf(y));
+      if (T.type[k] !== 2 || !T.coast[k] || T.fert[k] < 110 || al > 58) continue;
+      let land = 0;
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const ny = y + dy; if (ny >= 0 && ny < H && walkable(T.type[idx(x + dx, ny)])) land++; }
+      if (land >= 38) coastal.push(k);
     }
     const agents = [], chosen = [];
-    let minD = 40, tries = 0;
-    while (agents.length < LINEAGES.length && tries++ < 40000) {
-      if (tries % 4000 === 0) minD = Math.max(8, minD - 6);
+    let minD = 36, tries = 0;
+    while (agents.length < LINEAGES.length && tries++ < 120000) {
+      if (tries % 6000 === 0) minD = Math.max(6, minD - 4);
       const k = coastal[Math.floor(r() * coastal.length)];
       const x = k % W, y = Math.floor(k / W);
       if (chosen.every(([px, py]) => dist(px, py, x, y) >= minD)) {
@@ -364,7 +289,7 @@ export class World {
       lineages: LINEAGES.map(([name, hue], i) => ({ id: i, name, hue, dead: null })),
       chronicle: [{ t: now, tick: 0, kind: 'genesis', text: 'Seize drakkars touchent terre. Le monde commence.', sigil: '—' }],
       contributors: {}, totals: { units: 0, ticks: 0, decisions: 0 },
-    });
+    }, T);
   }
 
   setMarket(m) { this.market = m; this.climate = m ? Math.max(-1, Math.min(1, m.change / 1.5)) : 0; }

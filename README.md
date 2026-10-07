@@ -16,8 +16,14 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
 
 ## Architecture
 
-- `public/sim.js` — simulation déterministe partagée serveur/navigateur (terrain, agents, génome,
-  unités de travail, classe `World` : bail / intégration / chronique).
+- `public/sim.js` — simulation déterministe partagée serveur/navigateur (agents, génome, unités de travail,
+  classe `World` : bail / intégration / chronique). Le terrain est chargé, pas généré (`loadTerrain`).
+- `tools/build-terre.py` — fabrique les données Terre, une fois (Python : pillow, numpy, contourpy) :
+  ETOPO1 (altitude, via la rampe de couleurs), Blue Marble (humidité, indice de végétation) et Natural Earth
+  1:50m (côtes). Entrées : `basemap-data` (PyPI) et `world-atlas` (npm). Sorties versionnées dans `public/` :
+  `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko), `fond.png` (1536 × 768, type et niveau
+  d'altitude, 88 Ko), `cotes.bin` (1 424 arcs, 161 Ko), `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 /
+  4000 m, 203 Ko). Total ~600 Ko, mis en cache par le navigateur.
 - `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
   `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
 - `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
@@ -25,9 +31,10 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
   seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
 - `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
-- `public/index.html` — globe WebGL (projection orthographique dans le shader, terrain en texture 1152 × 576,
-  soit 3× la grille de simulation), couche vectorielle canvas (groupes, comptoirs, routes en arcs de grand
-  cercle, régions), HUD, chronique, boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
+- `public/index.html` — globe WebGL (projection orthographique dans le shader, `fond.png` en texture),
+  côtes et courbes de niveau **vectorielles** projetées sur un calque mis en cache (redessiné quand la caméra
+  bouge), couche canvas (groupes, comptoirs, routes en arcs de grand cercle, régions), HUD, chronique,
+  boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
   (confiné au globe : la page ne zoome jamais). Après 6 s sans manipulation, la caméra glisse d'elle-même
   vers la région en cours de calcul — la vôtre, sinon celle d'un autre témoin.
 
@@ -65,10 +72,9 @@ au comptoir (max 4).
 
 - La terre produit, pas les bras : `vivres += fertilité × 2 × min(pop, capacité) − pop`. Une cellule se partage.
 - Un comptoir (fondé après 24 saisons de sédentarité sur une terre fertile) multiplie la production par 1,6.
-- Sphère : grille 384 × 192 bouclée en longitude, 24 régions, pôles gelés, fertilité décroissante au-delà de 45°.
-- Terrain (`terrainField`) : bruit de gradient périodique, fBm continental (5 octaves) + détail de côtes
-  (6 octaves) avec déformation de domaine, crêtes multifractales pour les chaînes de montagnes, intérieur
-  des terres compressé. Calibré à ~29 % de terres émergées, 5–6 continents. Constantes dans `TERRAIN`.
+- La Terre : grille 384 × 192 (0,94° par cellule), 24 régions, calottes gelées (Antarctique, Groenland).
+  Fertilité = végétation Blue Marble × altitude × latitude (froid au-delà de 45°). Les seize drakkars accostent
+  sur des côtes fertiles de vraies masses continentales (pas d'îlots), entre 58° S et 58° N.
 - Génome 8 octets : seuil de faim, attrait de la fertilité, agressivité, errance, seuil de fondation,
   taille de scission, goût du littoral, taux de mutation. Hérité à la scission, muté.
 - Pas de sélection explicite : ce qui survit se transmet.

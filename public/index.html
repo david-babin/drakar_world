@@ -81,7 +81,7 @@ const tele = { cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceM
 })();
 
 // ---------- état ----------
-const DEMO = !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
+const DEMO = !!window.DRAKAR_DATA || !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
 let world = null, T = null, online = 1, lease = null;
 const peers = new Map();            // sigil → { region, step, agents: [[id,x,y,lin,pop]], at }
 const PEER_TTL = 6000;
@@ -96,17 +96,16 @@ const FS = `
 precision highp float;
 varying vec2 v;
 uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate; uniform float time;
-uniform sampler2D tex; uniform vec2 texel; uniform float texW;
+uniform sampler2D tex;
 const float PI = 3.14159265;
-vec3 colType(float t, float f) {
+vec3 colType(float t) {
   if (t < 0.5) return vec3(0.047, 0.078, 0.106);
   if (t < 1.5) return vec3(0.071, 0.118, 0.157);
-  if (t < 2.5) return mix(vec3(0.118, 0.145, 0.157), vec3(0.145, 0.180, 0.165), f);
-  if (t < 3.5) return vec3(0.165, 0.192, 0.200);
-  if (t < 4.5) return vec3(0.220, 0.247, 0.251);
+  if (t < 2.5) return vec3(0.118, 0.145, 0.157);
+  if (t < 3.5) return vec3(0.150, 0.178, 0.185);
+  if (t < 4.5) return vec3(0.195, 0.222, 0.228);
   return vec3(0.135, 0.165, 0.19);
 }
-float typeAt(vec2 uv) { return floor(texture2D(tex, vec2(fract(uv.x), uv.y)).r * 255. + .5); }
 void main() {
   vec2 px = v * res * .5;                       // pixels depuis le centre de l'écran
   vec2 q = (px - center) / R;                   // coordonnées sur le disque
@@ -124,24 +123,9 @@ void main() {
   float lat = asin(clamp(q.y * cl0 + z * sl0, -1., 1.));
   float lon = lon0 + atan(q.x, cl0 * z - q.y * sl0);
   vec2 uv = vec2(mod(lon / (2. * PI) + .5, 1.), 0.5 - lat / PI);
-  vec4 s = texture2D(tex, uv);
-  float t = floor(s.r * 255. + .5), f = s.g;
-  vec3 c = colType(t, f);
-  // contours : changement de type avec les voisins
-  // contours à épaisseur constante (~1.2 px) : on ne colore que la bordure du texel
-  vec2 fr = fract(uv / texel);
-  float lw = clamp(1.1 / (R * 6.2832 / texW * max(z, 0.25)), 0.03, 0.5);
-  float tE = typeAt(uv + vec2(texel.x, 0.)), tW = typeAt(uv - vec2(texel.x, 0.));
-  float tS = typeAt(uv + vec2(0., texel.y)), tN = typeAt(uv - vec2(0., texel.y));
-  float edge = 0.;
-  float wE = (t >= 2. || tE >= 2.) ? 0.34 : 0.10, wW = (t >= 2. || tW >= 2.) ? 0.34 : 0.10;
-  float wS = (t >= 2. || tS >= 2.) ? 0.34 : 0.10, wN = (t >= 2. || tN >= 2.) ? 0.34 : 0.10;
-  if (tE != t && fr.x > 1. - lw) edge = max(edge, wE);
-  if (tW != t && fr.x < lw) edge = max(edge, wW);
-  if (tS != t && fr.y > 1. - lw) edge = max(edge, wS);
-  if (tN != t && fr.y < lw) edge = max(edge, wN);
-  if (t == 5. || tE == 5. || tW == 5. || tS == 5. || tN == 5.) edge *= 0.35;   // la glace reste discrète
-  c = mix(c, vec3(0.79, 0.76, 0.70), edge);
+  float v = floor(texture2D(tex, uv).r * 255. + .5);
+  float t = floor(v / 32.), lvl = mod(v, 32.) / 2.;
+  vec3 c = colType(t) * (1.0 + lvl * 0.035);         // les hauteurs s'éclaircissent doucement
   // graticule 15°
   float gla = abs(fract(lat / PI * 12. + .5) - .5), glo = abs(fract(lon / PI * 12. + .5) - .5);
   float gw = 0.012 * (1.0 + 3.0 * (1.0 - z));
@@ -162,12 +146,32 @@ const U = n => gl.getUniformLocation(prog, n);
 const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-function uploadTerrain(G) {
-  const n = G.w * G.h, data = new Uint8Array(n * 4);
-  for (let k = 0; k < n; k++) { data[k * 4] = G.type[k]; data[k * 4 + 1] = G.fert[k]; data[k * 4 + 2] = G.coast[k] * 255; data[k * 4 + 3] = 255; }
-  gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, G.w, G.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-  gl.uniform2f(U('texel'), 1 / G.w, 1 / G.h); gl.uniform1f(U('texW'), G.w);
+gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+function uploadFond(img) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
+
+// ---------- données Terre ----------
+// terre.bin (grille de simulation), fond.png (remplissage), cotes.bin et niveaux.bin (lignes, int16 centièmes de degré)
+function parseLines(buf, withLevel) {
+  const dv = new DataView(buf); const n = dv.getUint32(0, true); let o = 4; const out = [];
+  for (let i = 0; i < n; i++) {
+    let level = 0; if (withLevel) { level = dv.getUint8(o); o += 1; }
+    const m = dv.getUint16(o, true); o += 2;
+    const lon = new Float32Array(m), cl = new Float32Array(m), sl = new Float32Array(m);
+    for (let j = 0; j < m; j++) { const la = dv.getInt16(o + 2, true) / 100 * DEG; lon[j] = dv.getInt16(o, true) / 100 * DEG; cl[j] = Math.cos(la); sl[j] = Math.sin(la); o += 4; }
+    out.push({ level, n: m, lon, cl, sl });
+  }
+  return out;
 }
+const b64 = s => { const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
+async function loadAssets() {
+  const E = window.DRAKAR_DATA;                        // version autonome (demo.html) : données inlinées
+  const get = async (name) => E ? b64(E[name]) : await (await fetch('/' + name)).arrayBuffer();
+  const [terre, cotes, niveaux] = await Promise.all([get('terre.bin'), get('cotes.bin'), get('niveaux.bin')]);
+  const img = new Image(); img.src = E ? 'data:image/png;base64,' + E['fond.png'] : '/fond.png';
+  await img.decode();
+  return { terre, img, cotes: parseLines(cotes, false), niveaux: parseLines(niveaux, true) };
+}
+let LINES = null;
 
 // ---------- caméra ----------
 const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
@@ -217,6 +221,37 @@ function geodesic(ax, ay, bx, by, steps) {
     pts.push(p ? [p.x, p.y] : null);
   }
   return pts;
+}
+// trace une ligne précalculée (cos/sin lat) avec coupure sur la face cachée
+function traceLine(g, L) {
+  const cl0 = Math.cos(cam.lat), sl0 = Math.sin(cam.lat);
+  let on = false;
+  for (let j = 0; j < L.n; j++) {
+    const dl = L.lon[j] - cam.lon, cd = Math.cos(dl);
+    const cosc = sl0 * L.sl[j] + cl0 * L.cl[j] * cd;
+    if (cosc < 0.02) { on = false; continue; }
+    const x = cx + R * L.cl[j] * Math.sin(dl), y = cy - R * (cl0 * L.sl[j] - sl0 * L.cl[j] * cd);
+    if (!on) { g.moveTo(x, y); on = true; } else g.lineTo(x, y);
+  }
+}
+// calque des côtes et courbes de niveau, redessiné seulement quand la caméra change
+const linesCv = document.createElement('canvas'); const lctx = linesCv.getContext('2d');
+let linesKey = '', linesAt = 0;
+function linesLayer(now) {
+  const key = `${cam.lon.toFixed(5)}|${cam.lat.toFixed(5)}|${R.toFixed(1)}|${cw}x${ch}|${dpr}`;
+  if (key === linesKey) return linesCv;
+  if (!(drag || pinch) && now - linesAt < 100) return linesCv;      // en dérive lente, 10 Hz suffisent
+  linesKey = key; linesAt = now;
+  if (linesCv.width !== cw * dpr || linesCv.height !== ch * dpr) { linesCv.width = cw * dpr; linesCv.height = ch * dpr; }
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0); lctx.clearRect(0, 0, cw, ch);
+  const zf = Math.min(1, 0.55 + cam.zoom * 0.25);
+  for (let lv = 0; lv < 5; lv++) {
+    lctx.strokeStyle = `rgba(201,194,178,${(0.07 + lv * 0.035) * zf})`; lctx.lineWidth = 0.6;
+    lctx.beginPath(); for (const L of LINES.niveaux) if (L.level === lv) traceLine(lctx, L); lctx.stroke();
+  }
+  lctx.strokeStyle = 'rgba(201,194,178,.42)'; lctx.lineWidth = 0.8;
+  lctx.beginPath(); for (const L of LINES.cotes) traceLine(lctx, L); lctx.stroke();
+  return linesCv;
 }
 function strokePath(pts) {
   let on = false;
@@ -312,6 +347,9 @@ function frame(now) {
     if (c && c.c > 0.2) { octx.font = '300 9px IBM Plex Mono'; octx.fillStyle = `rgba(201,194,178,${0.5 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
   }
   if (lease) regionBox(lease.unit.region, 'rgba(217,168,92,.6)', [3, 5]);
+
+  // relief : courbes de niveau (500 · 1000 · 2000 · 3000 · 4000 m), puis côtes
+  if (LINES) { const lc = linesLayer(now); octx.setTransform(1, 0, 0, 1, 0, 0); octx.drawImage(lc, 0, 0); octx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 
   // routes
   const byId = new Map(world.settlements.map(s => [s.id, s]));
@@ -414,7 +452,7 @@ function addChron(e, isNew) {
 function setWorld(w) {
   const first = !world;
   world = w;
-  if (first) { T = S.makeTerrain(w.seed); uploadTerrain(T); setTimeout(() => uploadTerrain(S.makeTerrain(w.seed, 3 * W, 3 * H)), 50); chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
+  if (first) { chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
 }
 
 // ---------- boucle de calcul ----------
@@ -443,6 +481,7 @@ async function runUnit(unit, verify, onDone, onProgress) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function loopServer() {
+  const A = await loadAssets(); T = S.loadTerrain(A.terre); uploadFond(A.img); LINES = A;
   let sock = null, backoff = 1000, waiting = null;
   const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
   const connect = () => new Promise(resolve => {
@@ -492,7 +531,8 @@ function syntheticMarket(day) {
   return { date: new Date(day).toISOString().slice(0, 10), close: Math.round(v * 100) / 100, prev, change: ((v - prev) / prev) * 100, source: 'synthétique' };
 }
 async function loopDemo() {
-  const w = S.World.create(20261007);
+  const A = await loadAssets(); T = S.loadTerrain(A.terre); uploadFond(A.img); LINES = A;
+  const w = S.World.create(20261007, T);
   const t = Date.now() - 37 * 86400000, gap = 3 * 3600000;
   w.s.created = t; w.s.chronicle[0].t = t;
   const ghosts = ['K7QD-3MZA', 'B2VX-9HLP', 'ZQ0F-P1NR', 'H8WT-4ECS'];
