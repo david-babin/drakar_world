@@ -65,6 +65,14 @@ Serveur → client : `hello {world, peers}` · `unit {unit, verify}` · `ack` / 
 3. Le serveur intègre, horodate la chronique, diffuse le nouvel état. Une unité sur 7 est recalculée
    côté serveur (déterminisme → même hash, sinon rejet).
 
+### Ce que voit le visiteur
+
+Rien n'explique la page. En haut à gauche, l'ère ; en haut à droite, le témoin (nom de code, indice, climat) ;
+en bas à gauche, la région en calcul ; en bas à droite, la chronique, atténuée. Après cinq secondes, un halo
+respire derrière le bloc du témoin (animation CSS composée, `opacity` + `transform` seulement, aucun coût
+CPU) ; au contact, un murmure de trois secondes — et, une fois seulement, ce que la page fait de la machine.
+Au survol, seuls les comptoirs se nomment.
+
 ### Reprise après veille / coupure
 
 Le serveur envoie un battement toutes les 20 s. Côté client, 45 s sans message = connexion morte : fermeture
