@@ -6,7 +6,8 @@ le résultat. Le monde n'avance que si quelqu'un le regarde.
 
 ## Lancer
 
-    node server.js            # Node ≥ 22, aucune dépendance (node:sqlite intégré)
+    cp .env.example .env      # puis FINNHUB_KEY=… (optionnel)
+    npm start                 # Node ≥ 22, aucune dépendance (node:sqlite et WebSocket intégrés)
     # → http://localhost:8787
 
 Variables : `PORT` (8787), `DB` (./monde.db), `SEED` (graine du terrain, ne change rien une fois la base créée).
@@ -17,27 +18,36 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
 
 - `public/sim.js` — simulation déterministe partagée serveur/navigateur (terrain, agents, génome,
   unités de travail, classe `World` : bail / intégration / chronique).
-- `server.js` — HTTP statique + API (`/api/world`, `/api/lease`, `/api/result`, `/api/events` en SSE,
-  `/api/stats`), persistance SQLite (état courant, snapshots horaires, journal des unités).
-- `market.js` — l'indice S&P 500 comme climat : Stooq → Yahoo → FRED (sans clé), cache SQLite,
-  repli sur une marche aléatoire datée si aucune source ne répond. Rafraîchi toutes les 30 min.
+- `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
+  `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
+- `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
+  l'indice lui-même étant payant) en REST au démarrage et toutes les 10 min, puis **trades en direct par
+  WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
+  seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
+- `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
 - `public/index.html` — globe WebGL (projection orthographique dans le shader, terrain en texture),
   couche vectorielle canvas (groupes, comptoirs, routes en arcs de grand cercle, régions), HUD, chronique,
   boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer ; rotation lente au repos.
 
-### Protocole
+### Protocole (WebSocket `/ws`)
 
-1. `POST /api/lease {sigil}` → `{unit, verify}` : la région la plus en retard, ses groupes, une graine dérivée
-   de (graine monde, région, tick). Bail de 90 s.
-2. Le navigateur exécute `simulateUnitGen` en l'animant (budget ~8 ms/frame, ~4 s par unité).
-3. `POST /api/result {sigil, result, hash}` : le serveur intègre, horodate la chronique, diffuse le nouvel
-   état à tous les onglets. Une unité sur 7 est recalculée côté serveur (déterminisme → même hash,
-   sinon rejet).
+Client → serveur : `hello {sigil}` · `lease` · `progress {region, step, agents}` (toutes les 400 ms pendant
+le calcul) · `result {result, hash, ms, verify}`.
+Serveur → client : `hello {world, peers}` · `unit {unit, verify}` · `ack` / `nack` · `world` · `chronicle` ·
+`market {market, climate}` · `online` · `lease` / `progress` / `release` (les autres visiteurs).
+
+1. Le serveur attribue la région la plus en retard, ses groupes, une graine dérivée de
+   (graine monde, région, tick) et le climat du moment. Bail de 90 s.
+2. Le navigateur exécute `simulateUnitGen` en l'animant (~4 s par unité) et diffuse sa progression :
+   **les autres visiteurs voient sa région, son pourcentage et ses groupes bouger en direct**.
+3. Le serveur intègre, horodate la chronique, diffuse le nouvel état. Une unité sur 7 est recalculée
+   côté serveur (déterminisme → même hash, sinon rejet).
 
 ### Climat = marché
 
-Le serveur lit la variation journalière de l'indice et la convertit en `climate ∈ [-1, 1]`
-(`variation % / 1,5`). Cette valeur est **embarquée dans chaque unité de travail**, donc la
+Le serveur lit la variation de l'indice depuis la clôture précédente (en direct pendant la séance avec
+Finnhub) et la convertit en `climate ∈ [-1, 1]` (`variation % / 1,5`). Quand le régime change
+(abondance / ordinaire / disette, seuils ±0,25), la chronique l'annonce : « Les vents tournent ». Cette valeur est **embarquée dans chaque unité de travail**, donc la
 simulation reste déterministe et vérifiable. Effets : rendement des terres × (1 + 0,45 climat),
 famine plus douce ou plus dure, scissions facilitées en expansion, razzias plus fréquentes en
 contraction, portée des routes ± 25 %. Le halo du globe vire à l'ambre en hausse, au bleu en baisse.
