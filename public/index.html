@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>drakar</title>
+<meta name="description" content="Un monde. Il n'avance que si quelqu'un le regarde.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b1015; --ink: #c9c2b2; --dim: #6c6a60; --faint: #3a3d3f; --line: #1d2429;
+  --sea: #0c141b; --shoal: #121e28; --land: #1e2528; --hill: #2a3133; --peak: #383f40;
+  --accent: #d9a85c; --mono: 'IBM Plex Mono', ui-monospace, monospace; --serif: 'Cormorant Garamond', Georgia, serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
+body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spacing: .02em; }
+#map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+#veil { position: fixed; inset: 0; background: var(--bg); pointer-events: none; transition: opacity 2.4s ease; }
+.hud { position: fixed; pointer-events: none; color: var(--dim); line-height: 1.7; }
+.hud b { color: var(--ink); font-weight: 400; }
+.hud i { color: var(--accent); font-style: normal; }
+#brand { left: 20px; bottom: 16px; font-family: var(--serif); font-size: 28px; letter-spacing: .14em; color: var(--ink); text-transform: lowercase; font-weight: 400; }
+#brand small { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .18em; color: var(--dim); margin-top: -2px; }
+#era { left: 20px; top: 16px; font-family: var(--serif); font-size: 15px; letter-spacing: .08em; color: var(--ink); }
+#era small { display: block; font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: .1em; margin-top: 2px; }
+#tele { right: 20px; top: 16px; text-align: right; white-space: pre; }
+#chron { right: 20px; bottom: 16px; width: 290px; max-height: 42vh; overflow: hidden; text-align: right;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%); mask-image: linear-gradient(to bottom, transparent, #000 35%); }
+#chron div { padding: 1px 0; opacity: .85; }
+#chron div.new { animation: rise 1.4s ease both; }
+#chron em { color: var(--faint); font-style: normal; margin-left: 8px; }
+#chron span.an { color: var(--dim); margin-right: 8px; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: .85; transform: none; } }
+#status { left: 20px; bottom: 76px; }
+#status .bar { display: inline-block; width: 120px; height: 2px; background: var(--line); vertical-align: middle; margin-left: 8px; }
+#status .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .12s linear; }
+#tip { position: fixed; pointer-events: none; padding: 6px 9px; background: rgba(11,16,21,.92); border: 1px solid var(--line); color: var(--ink); display: none; white-space: nowrap; }
+#tip small { color: var(--dim); display: block; }
+@media (max-width: 720px) { #tele, #chron { display: none; } #brand { font-size: 22px; } body { font-size: 10px; } }
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+<div id="veil"></div>
+
+<div id="era" class="hud">An —<small>—</small></div>
+<div id="tele" class="hud"></div>
+<div id="status" class="hud"></div>
+<div id="chron" class="hud"></div>
+<div id="brand" class="hud">drakar<small>.tech</small></div>
+<div id="tip"></div>
+
+<script type="module">
+import * as S from './sim.js';
+const { W, H, RX, RY, RW, RH, STEPS, REGION_NAMES, ROMAN } = S;
+
+// ---------- identité du visiteur : un sigle dérivé de la machine, stable ----------
+function sigil() {
+  try { const s = localStorage.getItem('drakar.sigil'); if (s) return s; } catch {}
+  const src = [navigator.hardwareConcurrency, navigator.deviceMemory, screen.width, screen.height, screen.colorDepth,
+    Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.language, navigator.platform, Math.random()].join('|');
+  const h = S.hashStr(src).toString(36).toUpperCase().padStart(8, '0');
+  const sg = `${h.slice(0, 4)}-${h.slice(4, 8)}`;
+  try { localStorage.setItem('drakar.sigil', sg); } catch {}
+  return sg;
+}
+const ME = sigil();
+
+// ---------- télémétrie machine ----------
+const tele = {
+  cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0, gpu: '—', batt: null, net: null,
+  fps: 0, dps: 0, latency: 0, units: 0, ticks: 0, decisions: 0,
+};
+(async () => {
+  try { const c = document.createElement('canvas'); const gl = c.getContext('webgl'); const d = gl?.getExtension('WEBGL_debug_renderer_info');
+    if (d) tele.gpu = gl.getParameter(d.UNMASKED_RENDERER_WEBGL).replace(/ANGLE \((.*)\)/, '$1').split(',')[1]?.trim() || gl.getParameter(d.UNMASKED_RENDERER_WEBGL); } catch {}
+  try { const b = await navigator.getBattery?.(); if (b) { const u = () => tele.batt = { level: b.level, charging: b.charging }; u(); b.onlevelchange = b.onchargingchange = u; } } catch {}
+  try { const n = navigator.connection; if (n) { const u = () => tele.net = { type: n.effectiveType, rtt: n.rtt }; u(); n.onchange = u; } } catch {}
+})();
+
+// ---------- état ----------
+const DEMO = !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
+let world = null, T = null, online = 1;
+let lease = null;      // { unit, agents (animés), step, t0, verify }
+let hover = null;
+const chron = document.getElementById('chron');
+
+// ---------- rendu ----------
+const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+let dpr = 1, sx = 1, sy = 1, ox = 0, oy = 0, terrainLayer = null;
+function resize() {
+  dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  const s = Math.max(innerWidth / W, innerHeight / H);
+  sx = sy = s; ox = (innerWidth - W * s) / 2; oy = (innerHeight - H * s) / 2;
+  terrainLayer = null;
+}
+addEventListener('resize', resize); resize();
+const px = x => ox + x * sx, py = y => oy + y * sy;
+const hue = lin => world?.lineages[lin]?.hue ?? 0;
+
+function drawTerrain() {
+  const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height;
+  const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const col = { 0: css.getPropertyValue('--sea'), 1: css.getPropertyValue('--shoal'), 2: css.getPropertyValue('--land'), 3: css.getPropertyValue('--hill'), 4: css.getPropertyValue('--peak') };
+  g.fillStyle = col[0]; g.fillRect(0, 0, innerWidth, innerHeight);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const t = T.type[y * W + x]; if (t === 0) continue;
+    g.fillStyle = col[t]; g.fillRect(px(x), py(y), sx + .5, sy + .5);
+  }
+  // isobathes & courbes de niveau : contours entre types
+  g.lineWidth = .7;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x, t = T.type[k];
+    const r = x < W - 1 ? T.type[k + 1] : t, d = y < H - 1 ? T.type[k + W] : t;
+    if (r !== t) { g.strokeStyle = (t >= 2 || r >= 2) ? 'rgba(201,194,178,.28)' : 'rgba(201,194,178,.09)'; g.beginPath(); g.moveTo(px(x + 1), py(y)); g.lineTo(px(x + 1), py(y + 1)); g.stroke(); }
+    if (d !== t) { g.strokeStyle = (t >= 2 || d >= 2) ? 'rgba(201,194,178,.28)' : 'rgba(201,194,178,.09)'; g.beginPath(); g.moveTo(px(x), py(y + 1)); g.lineTo(px(x + 1), py(y + 1)); g.stroke(); }
+  }
+  // graticule
+  g.strokeStyle = 'rgba(201,194,178,.05)'; g.lineWidth = .5;
+  for (let x = 0; x <= W; x += 12) { g.beginPath(); g.moveTo(px(x), 0); g.lineTo(px(x), innerHeight); g.stroke(); }
+  for (let y = 0; y <= H; y += 12) { g.beginPath(); g.moveTo(0, py(y)); g.lineTo(innerWidth, py(y)); g.stroke(); }
+  // numéros de régions
+  g.font = `500 ${Math.max(12, sy * 3)}px Cormorant Garamond, serif`; g.fillStyle = 'rgba(201,194,178,.14)'; g.textAlign = 'right';
+  for (let i = 0; i < RX * RY; i++) g.fillText(ROMAN[i], px((i % RX + 1) * RW) - 8, py(Math.floor(i / RX) * RH) + 8 + sy * 3);
+  return c;
+}
+
+let last = performance.now(), frames = 0, fpsAt = last;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!world) return;
+  if (!terrainLayer) terrainLayer = drawTerrain();
+  frames++; if (now - fpsAt > 1000) { tele.fps = frames; frames = 0; fpsAt = now; }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(terrainLayer, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // région en cours de calcul
+  if (lease) {
+    const u = lease.unit, x0 = px(u.rx * RW), y0 = py(u.ry * RH);
+    ctx.fillStyle = 'rgba(217,168,92,.045)'; ctx.fillRect(x0, y0, RW * sx, RH * sy);
+    ctx.strokeStyle = 'rgba(217,168,92,.55)'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.lineDashOffset = -now / 40;
+    ctx.strokeRect(x0 + .5, y0 + .5, RW * sx - 1, RH * sy - 1); ctx.setLineDash([]);
+  }
+  for (const l of world.leased || []) if (l.sigil !== ME) {
+    const x0 = px((l.region % RX) * RW), y0 = py(Math.floor(l.region / RX) * RH);
+    ctx.strokeStyle = 'rgba(201,194,178,.22)'; ctx.lineWidth = 1; ctx.setLineDash([2, 6]); ctx.strokeRect(x0 + .5, y0 + .5, RW * sx - 1, RH * sy - 1); ctx.setLineDash([]);
+  }
+
+  // comptoirs
+  for (const st of world.settlements) {
+    const x = px(st.x + .5), y = py(st.y + .5);
+    ctx.strokeStyle = `hsla(${hue(st.lin)},55%,62%,.9)`; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.rect(x - 2.5, y - 2.5, 5, 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, y - 2.5); ctx.lineTo(x, y - 7); ctx.stroke();
+    if (sx > 5) { ctx.font = '300 9px IBM Plex Mono'; ctx.fillStyle = 'rgba(201,194,178,.55)'; ctx.textAlign = 'left'; ctx.fillText(st.name, x + 6, y + 3); }
+  }
+
+  // groupes : ceux de la région qu'on calcule sont animés, les autres figés
+  const animatedIds = lease ? new Set(lease.agents.map(a => a.id)) : null;
+  const drawAgent = (a, alpha) => {
+    const x = px(a.x + .5), y = py(a.y + .5), r = Math.min(4.5, 1.2 + Math.sqrt(a.pop) * .22);
+    ctx.fillStyle = `hsla(${hue(a.lin)},60%,66%,${alpha})`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+    if (a.dx || a.dy) { ctx.strokeStyle = `hsla(${hue(a.lin)},60%,66%,${alpha * .6})`; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + a.dx * (r + 3), y + a.dy * (r + 3)); ctx.stroke(); }
+  };
+  for (const a of world.agents) if (!animatedIds || !animatedIds.has(a.id)) drawAgent(a, .78);
+  if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
+
+  // mémoires : événements récents
+  const t = Date.now();
+  for (const e of world.chronicle.slice(-12)) if (e.x != null && t - e.t < 20000) {
+    const k = 1 - (t - e.t) / 20000, x = px(e.x + .5), y = py(e.y + .5);
+    ctx.strokeStyle = `hsla(${hue(e.lin)},60%,66%,${k * .5})`; ctx.lineWidth = .8;
+    ctx.beginPath(); ctx.arc(x, y, 6 + (1 - k) * 18, 0, 6.283); ctx.stroke();
+  }
+
+  if (now - last > 250) { last = now; hud(); }
+}
+requestAnimationFrame(frame);
+
+// ---------- HUD ----------
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString('fr-FR');
+function hud() {
+  const pop = world.agents.reduce((n, a) => n + a.pop, 0);
+  const alive = world.lineages.filter(l => !l.dead).length;
+  const age = Math.max(0, Math.floor((Date.now() - world.created) / 86400000));
+  $('era').innerHTML = `An ${fmt(world.year)}<small>${fmt(pop)} âmes · ${world.settlements.length} comptoirs · ${alive} lignées · ${age} j</small>`;
+  const b = tele.batt ? `${Math.round(tele.batt.level * 100)}% ${tele.batt.charging ? '⚡' : ''}` : '—';
+  const n = tele.net ? `${tele.net.type} ${tele.net.rtt}ms` : '—';
+  $('tele').innerHTML =
+`<b>${ME}</b>
+cpu <b>${tele.cores || '?'}</b> · mem <b>${tele.mem ? tele.mem + ' Go' : '?'}</b>
+${tele.gpu.slice(0, 30)}
+batt <b>${b}</b> · net <b>${n}</b>
+fps <b>${tele.fps}</b> · <i>${fmt(tele.dps)} déc/s</i>
+unités <b>${tele.units}</b> · saisons <b>${fmt(tele.ticks)}</b>
+en ligne <b>${online}</b> · témoins <b>${world.contributors}</b>
+total <b>${fmt(world.totals.decisions)}</b> décisions`;
+  let st = '';
+  if (lease) st = `calcul · ${REGION_NAMES[lease.unit.region]} <i>${ROMAN[lease.unit.region]}</i><span class="bar"><i style="width:${(100 * lease.step / STEPS) | 0}%"></i></span>`;
+  else if (DEMO) st = `mode démo · monde local`;
+  else st = `synchronisation`;
+  $('status').innerHTML = st;
+}
+function addChron(e, isNew) {
+  const d = document.createElement('div'); if (isNew) d.className = 'new';
+  d.innerHTML = `<span class="an">${e.an || 'An ' + Math.floor(e.tick / 4)}</span>${e.text}<em>${e.sigil === ME ? '◆' : e.sigil}</em>`;
+  chron.appendChild(d); while (chron.children.length > 14) chron.firstChild.remove();
+}
+function setWorld(w) {
+  const first = !world;
+  world = w;
+  if (!T || first) { T = S.makeTerrain(w.seed); terrainLayer = null; }
+  if (first) { chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
+}
+
+// ---------- survol ----------
+const tip = $('tip');
+cv.addEventListener('mousemove', ev => {
+  if (!world) return;
+  const x = Math.floor((ev.clientX - ox) / sx), y = Math.floor((ev.clientY - oy) / sy);
+  const near = (a) => Math.abs(a.x - x) <= 1 && Math.abs(a.y - y) <= 1;
+  const st = world.settlements.find(near);
+  const ag = (lease?.agents || []).find(a => a.pop > 0 && near(a)) || world.agents.find(near);
+  if (!st && !ag) { tip.style.display = 'none'; return; }
+  tip.style.display = 'block'; tip.style.left = ev.clientX + 14 + 'px'; tip.style.top = ev.clientY + 14 + 'px';
+  if (st) tip.innerHTML = `${st.name}<small>${world.lineages[st.lin].name} · fondé an ${Math.floor(st.founded / 4)}${st.sigil ? ' · témoin ' + st.sigil : ''}</small>`;
+  else tip.innerHTML = `lignée ${world.lineages[ag.lin].name}<small>${ag.pop} âmes · vivres ${Math.floor(ag.food)} · génome ${ag.g.map(v => v.toString(16).padStart(2, '0')).join('')}</small>`;
+});
+cv.addEventListener('mouseleave', () => tip.style.display = 'none');
+
+// ---------- boucle de calcul ----------
+// Le navigateur demande une région, simule STEPS saisons en l'animant (budget ~8 ms/frame), renvoie.
+const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1.5));
+async function runUnit(unit, verify, onDone) {
+  const gen = S.simulateUnitGen(T, unit);
+  lease = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  let lastDec = 0, lastT = performance.now();
+  const pace = Math.max(1, Math.round(STEPS / 240));   // ~4 s par unité à 60 fps
+  await new Promise(resolve => {
+    const tickFrame = () => {
+      const start = performance.now();
+      let r;
+      for (let i = 0; i < pace; i++) {
+        r = gen.next();
+        if (r.done) break;
+        lease.agents = r.value.agents; lease.step = r.value.step + 1;
+        if (performance.now() - start > budgetMs()) break;
+      }
+      const now = performance.now();
+      if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
+      if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
+    };
+    requestAnimationFrame(tickFrame);
+  });
+}
+
+async function loopServer() {
+  const es = new EventSource('/api/events');
+  es.addEventListener('world', e => setWorld(JSON.parse(e.data)));
+  es.addEventListener('chronicle', e => addChron(JSON.parse(e.data), true));
+  es.addEventListener('online', e => online = JSON.parse(e.data).online);
+  es.addEventListener('hello', e => online = JSON.parse(e.data).online);
+  es.addEventListener('ping', e => online = JSON.parse(e.data).online);
+  setWorld(await (await fetch('/api/world')).json());
+  for (;;) {
+    try {
+      const t0 = performance.now();
+      const res = await fetch('/api/lease', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sigil: ME }) });
+      tele.latency = Math.round(performance.now() - t0);
+      if (res.status === 204) { lease = null; await sleep(4000); continue; }
+      const { unit, verify } = await res.json();
+      await runUnit(unit, verify, async (result, ms) => {
+        const r = await fetch('/api/result', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sigil: ME, result, verify, hash: S.hashResult(result), ms: Math.round(ms) }) });
+        if (r.ok) { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
+      });
+      lease = null;
+      await sleep(900 + Math.random() * 1500);     // respiration entre deux unités
+    } catch (e) { lease = null; await sleep(5000); }
+  }
+}
+
+// mode démo : le monde vit dans l'onglet (fichier ouvert sans serveur, ou ?demo)
+async function loopDemo() {
+  const w = S.World.create(20261007);
+  const t = Date.now() - 37 * 86400000, gap = 3 * 3600000;
+  w.s.created = t; w.s.chronicle[0].t = t;
+  // un passé : quelques unités calculées « par d'autres »
+  const ghosts = ['K7QD-3MZA', 'B2VX-9HLP', 'ZQ0F-P1NR', 'H8WT-4ECS'];
+  for (let i = 0; i < 60; i++) { const g = ghosts[i % 4]; const at = t + (i < 24 ? i * gap : 19 * 86400000 + i * gap); const u = w.lease(g, at); if (u) w.integrate(S.simulateUnit(w.T, u), g, { now: at }); }
+  for (const c of w.s.chronicle) c.t = Math.min(c.t, Date.now() - 60000);
+  online = 1 + Math.floor(Math.random() * 3);
+  setWorld(w.snapshot(online));
+  for (;;) {
+    const unit = w.lease(ME);
+    await runUnit(unit, false, (result) => { const r = w.integrate(result, ME); tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; setWorld(w.snapshot(online)); for (const e of r.entries) addChron(e, true); });
+    lease = null;
+    await sleep(900 + Math.random() * 1500);
+  }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(DEMO ? loopDemo : loopServer)();
+</script>
+</body>
+</html>

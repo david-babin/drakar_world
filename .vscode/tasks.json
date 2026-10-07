@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "drakar: serveur",
+      "type": "shell",
+      "command": "node --no-warnings server.js",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "drakar: test simulation",
+      "type": "shell",
+      "command": "node test/sim.test.mjs",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "drakar: effacer monde-dev.db",
+      "type": "shell",
+      "command": "node -e \"for (const f of ['monde-dev.db','monde-dev.db-wal','monde-dev.db-shm']) try { require('fs').unlinkSync(f) } catch {}\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "drakar: construire demo.html",
+      "type": "shell",
+      "command": "node build-demo.mjs",
+      "problemMatcher": []
+    }
+  ]
+}
