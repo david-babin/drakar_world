@@ -9,6 +9,7 @@
 // Sorties (versionnées, dans public/) :
 //   terre.bin    grille de simulation 384×192 : type (0 mer, 1 haut-fond, 2 plaine, 3 collines, 4 montagne, 5 glace) + fertilité
 //   fond.png     1536×768 niveaux de gris : type*32 + niveau d'altitude*2   (remplissage du globe)
+//   terres.bin   anneaux Natural Earth déroulés (lon jusqu'à 540°), int16 1/60°  (remplissage des terres, parité de stencil)
 //   cotes.bin    arcs Natural Earth, int16 centièmes de degré               (côtes vectorielles)
 //   niveaux.bin  courbes de niveau 500/1000/2000/3000/4000 m, int16        (relief vectoriel)
 //
@@ -124,14 +125,14 @@ function fillRing(ext, ring, value) {
   }
 }
 function landMask(path) {
-  const topo = JSON.parse(fs.readFileSync(path, 'utf8')), arcs = topoArcs(topo);
+  const topo = JSON.parse(fs.readFileSync(path, 'utf8')), arcs = topoArcs(topo); const rings = [];
   const land = topo.objects.land, geoms = land.type === 'GeometryCollection' ? land.geometries : [land];
   const ext = new Uint8Array(2 * FW * FH), mask = new Uint8Array(FW * FH);
   const polys = [];
   for (const g of geoms) { if (g.type === 'Polygon') polys.push(g.arcs); else if (g.type === 'MultiPolygon') polys.push(...g.arcs); }
-  for (const poly of polys) poly.forEach((ring, k) => { const pts = ringPoints(ring, arcs); if (pts.length >= 3) fillRing(ext, pts, k === 0 ? 1 : 0); });
+  for (const poly of polys) poly.forEach((ring, k) => { const pts = ringPoints(ring, arcs); if (pts.length >= 3) { fillRing(ext, pts, k === 0 ? 1 : 0); rings.push(unwrap(pts)); } });
   for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) mask[y * FW + x] = ext[y * 2 * FW + x] | ext[y * 2 * FW + x + FW];
-  return { mask, arcs };
+  return { mask, arcs, rings };
 }
 
 // ---------- lignes ----------
@@ -178,7 +179,7 @@ function packLines(lines, withLevel) {
 // ---------- main ----------
 log('altitude…'); const { meters: m0, shoal, white } = elevationFromEtopo(args.etopo);
 log('humidité…'); const moist = moistureFromBmng(args.bmng);
-log('côtes…'); const { mask: land, arcs } = landMask(args.land);
+log('côtes…'); const { mask: land, arcs, rings } = landMask(args.land);
 
 const latAt = y => 90 - (y + 0.5) / FH * 180;
 const ice = new Uint8Array(FW * FH), meters = new Float32Array(FW * FH);
@@ -221,6 +222,16 @@ fs.writeFileSync(`${OUT}/terre.bin`, Buffer.concat([head, Buffer.from(typ), Buff
 const cotes = arcs.map(a => simplify(a, 0.015)).filter(a => a.length >= 2).map(a => [0, a]);
 const [cb, cn] = packLines(cotes, false); fs.writeFileSync(`${OUT}/cotes.bin`, cb);
 log(`cotes.bin : ${cotes.length} arcs, ${cn} points, ${cb.length >> 10} ko`);
+
+// terres : anneaux déroulés pour le remplissage par parité (le client les dessine à 0 et −360°)
+{
+  const rs = rings.map(r => simplify(r, 0.015)).filter(r => r.length >= 3);
+  let size = 4, n = 0; for (const r of rs) { size += 4 + 4 * r.length; n += r.length; }
+  const buf = Buffer.alloc(size); let o = 0; buf.writeUInt32LE(rs.length, o); o += 4;
+  for (const r of rs) { buf.writeUInt32LE(r.length, o); o += 4; for (const [x, y] of r) { buf.writeInt16LE(Math.round(x * 60), o); buf.writeInt16LE(Math.round(y * 60), o + 2); o += 4; } }
+  fs.writeFileSync(`${OUT}/terres.bin`, buf);
+  log(`terres.bin : ${rs.length} anneaux, ${n} points, ${buf.length >> 10} ko`);
+}
 
 // courbes de niveau (marching squares) — anneaux en coordonnées de grille → degrés
 const gen = d3contours().size([FW, FH]).smooth(true);

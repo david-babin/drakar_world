@@ -89,89 +89,191 @@ const chron = document.getElementById('chron');
 const $ = id => document.getElementById(id);
 
 // ---------- globe WebGL ----------
+// Tout ce qui est géographique est rendu par le GPU dans la même passe : fond (classes de terrain), terres
+// (anneaux Natural Earth remplis par parité de stencil dans une texture, une fois), côtes et courbes de
+// niveau (segments instanciés, extrudés en épaisseur dans le vertex shader). Le canvas 2D ne porte que la vie.
 const gcv = $('globe'), ocv = $('over'), octx = ocv.getContext('2d');
-const gl = gcv.getContext('webgl', { antialias: true, alpha: false, premultipliedAlpha: false });
-const VS = `attribute vec2 p; varying vec2 v; void main(){ v = p; gl_Position = vec4(p, 0., 1.); }`;
-const FS = `
+const gl = gcv.getContext('webgl', { antialias: true, alpha: false, stencil: true, premultipliedAlpha: false });
+function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+function program(vs, fs) { const p = gl.createProgram(); gl.attachShader(p, shader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const u = {}, a = {}; for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) { const n = gl.getActiveUniform(p, i).name; u[n] = gl.getUniformLocation(p, n); } for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES); i++) { const n = gl.getActiveAttrib(p, i).name; a[n] = gl.getAttribLocation(p, n); } return { p, u, a }; }
+const quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+// --- 1. le globe : disque, fond, terres, graticule, ombrage
+const GLOBE = program(`attribute vec2 p; varying vec2 v; void main(){ v = p; gl_Position = vec4(p, 0., 1.); }`, `
 precision highp float;
 varying vec2 v;
-uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate; uniform float time;
-uniform sampler2D tex;
+uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate;
+uniform sampler2D fond; uniform sampler2D mask;
 const float PI = 3.14159265;
-vec3 colType(float t) {
-  if (t < 0.5) return vec3(0.047, 0.078, 0.106);
-  if (t < 1.5) return vec3(0.071, 0.118, 0.157);
-  if (t < 2.5) return vec3(0.118, 0.145, 0.157);
-  if (t < 3.5) return vec3(0.150, 0.178, 0.185);
-  if (t < 4.5) return vec3(0.195, 0.222, 0.228);
-  return vec3(0.135, 0.165, 0.19);
+vec3 landCol(float t) {
+  if (t < 3.5) return vec3(0.118, 0.145, 0.157);     // plaine (ou classe inconnue au bord)
+  if (t < 4.5) return vec3(0.150, 0.178, 0.185);     // collines
+  if (t < 5.5) return vec3(0.195, 0.222, 0.228);     // montagne
+  return vec3(0.135, 0.165, 0.19);                   // glace
 }
 void main() {
-  vec2 px = v * res * .5;                       // pixels depuis le centre de l'écran
-  vec2 q = (px - center) / R;                   // coordonnées sur le disque
+  vec2 px = v * res * .5;
+  vec2 q = (px - center) / R;
   float d2 = dot(q, q);
   vec3 bg = vec3(0.027, 0.035, 0.047);
-  float tint = climate;                         // ambre si expansion, bleu si contraction
+  float tint = climate;
   vec3 glowC = tint >= 0. ? vec3(0.85, 0.66, 0.36) : vec3(0.50, 0.64, 0.77);
-  if (d2 > 1.0) {
-    float d = sqrt(d2);
-    float halo = exp(-(d - 1.0) * 14.0) * (0.10 + 0.10 * abs(tint));
-    gl_FragColor = vec4(bg + glowC * halo, 1.); return;
-  }
+  if (d2 > 1.0) { float d = sqrt(d2); float halo = exp(-(d - 1.0) * 14.0) * (0.10 + 0.10 * abs(tint)); gl_FragColor = vec4(bg + glowC * halo, 1.); return; }
   float z = sqrt(1.0 - d2);
   float cl0 = cos(lat0), sl0 = sin(lat0);
   float lat = asin(clamp(q.y * cl0 + z * sl0, -1., 1.));
   float lon = lon0 + atan(q.x, cl0 * z - q.y * sl0);
   vec2 uv = vec2(mod(lon / (2. * PI) + .5, 1.), 0.5 - lat / PI);
-  float v = floor(texture2D(tex, uv).r * 255. + .5);
-  float t = floor(v / 32.), lvl = mod(v, 32.) / 2.;
-  vec3 c = colType(t) * (1.0 + lvl * 0.035);         // les hauteurs s'éclaircissent doucement
-  // graticule 15°
+  float fv = floor(texture2D(fond, uv).r * 255. + .5);
+  float t = floor(fv / 32.), lvl = mod(fv, 32.) / 2.;
+  float land = texture2D(mask, uv).r;                 // terres vectorielles, lissées au bord par le filtrage
+  vec3 sea = (t >= 1.5 || t == 1.) ? vec3(0.071, 0.118, 0.157) : vec3(0.047, 0.078, 0.106);   // plateau continental
+  vec3 c = mix(sea, landCol(t + 1.) * (1.0 + lvl * 0.035), land);
+  if (t > 4.5 && land > 0.5) c = landCol(6.);        // glace
   float gla = abs(fract(lat / PI * 12. + .5) - .5), glo = abs(fract(lon / PI * 12. + .5) - .5);
   float gw = 0.012 * (1.0 + 3.0 * (1.0 - z));
   float grat = (1.0 - smoothstep(0.0, gw, gla)) + (1.0 - smoothstep(0.0, gw, glo));
   c += vec3(0.79, 0.76, 0.70) * grat * 0.045;
-  // relief : limbe assombri, lumière rasante
   float shade = 0.55 + 0.45 * pow(z, 0.6);
   c *= shade;
-  c += glowC * (0.05 * abs(tint)) * (1.0 - z);  // saison
+  c += glowC * (0.05 * abs(tint)) * (1.0 - z);
   float aa = smoothstep(1.0, 1.0 - 2.0 / R, d2);
   gl_FragColor = vec4(mix(bg, c, aa), 1.);
-}`;
-function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
-const prog = gl.createProgram(); gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
-const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-const U = n => gl.getUniformLocation(prog, n);
-const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}`);
+const texFond = gl.createTexture(), texMask = gl.createTexture();
+function texParams(filter, wrapS) { gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); }
 gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-function uploadFond(img) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
+function uploadFond(img) { gl.bindTexture(gl.TEXTURE_2D, texFond); texParams(gl.NEAREST, gl.CLAMP_TO_EDGE); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); }
+
+// --- 2. les terres : parité de stencil sur les anneaux, en équirectangulaire, dans une texture
+const MASKW = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE)), MASKH = MASKW / 2;
+const QUADP = program(`attribute vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`, `precision mediump float; void main(){ gl_FragColor = vec4(1.); }`);
+const FILL = program(`attribute vec2 ll; uniform float off; void main(){ gl_Position = vec4((ll.x + off) / 180., ll.y / 90., 0., 1.); }`, `precision mediump float; void main(){ gl_FragColor = vec4(1.); }`);
+function buildMask(rings) {
+  // triangles en éventail depuis le premier point de chaque anneau ; la parité du stencil fait le reste (trous compris)
+  let tri = 0; for (const r of rings) tri += Math.max(0, r.length / 2 - 2);
+  const data = new Float32Array(tri * 6); let o = 0;
+  for (const r of rings) { const ax = r[0], ay = r[1]; for (let i = 1; i + 1 < r.length / 2; i++) { data[o++] = ax; data[o++] = ay; data[o++] = r[2 * i]; data[o++] = r[2 * i + 1]; data[o++] = r[2 * i + 2]; data[o++] = r[2 * i + 3]; } }
+  const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  gl.bindTexture(gl.TEXTURE_2D, texMask); texParams(gl.LINEAR, gl.REPEAT);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MASKW, MASKH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texMask, 0);
+  const rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.STENCIL_INDEX8, MASKW, MASKH);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.STENCIL_ATTACHMENT, gl.RENDERBUFFER, rb);
+  gl.viewport(0, 0, MASKW, MASKH); gl.clearColor(0, 0, 0, 1); gl.clearStencil(0); gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+  gl.useProgram(FILL.p); gl.enableVertexAttribArray(FILL.a.ll); gl.vertexAttribPointer(FILL.a.ll, 2, gl.FLOAT, false, 0, 0);
+  gl.enable(gl.STENCIL_TEST); gl.colorMask(false, false, false, false);
+  gl.stencilFunc(gl.ALWAYS, 0, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+  for (const off of [0, -360]) { gl.uniform1f(FILL.u.off, off); gl.drawArrays(gl.TRIANGLES, 0, tri * 3); }   // les anneaux déroulés au-delà de 180° reviennent à gauche
+  gl.colorMask(true, true, true, true); gl.stencilFunc(gl.EQUAL, 1, 0xff); gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+  gl.disableVertexAttribArray(FILL.a.ll);
+  gl.useProgram(QUADP.p); gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.enableVertexAttribArray(QUADP.a.p); gl.vertexAttribPointer(QUADP.a.p, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);                 // blanc partout où la parité est impaire : la terre
+  gl.disableVertexAttribArray(QUADP.a.p);
+  gl.disable(gl.STENCIL_TEST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteBuffer(vb); gl.deleteRenderbuffer(rb); gl.deleteFramebuffer(fb);
+}
+
+// --- 3. les lignes : un segment par instance, extrudé en quad dans le vertex shader
+const LINE = program(`
+attribute vec3 a0, a1; attribute vec2 corner;
+uniform mat3 M; uniform vec2 res, center; uniform float R, hw;
+varying float vz;
+void main() {
+  vec3 q0 = M * a0, q1 = M * a1;
+  vec2 s0 = center + R * vec2(q0.x, -q0.y), s1 = center + R * vec2(q1.x, -q1.y);
+  vec2 d = s1 - s0; float L = length(d); d = L > 0.0 ? d / L : vec2(1., 0.);
+  vec2 n = vec2(-d.y, d.x);
+  vec2 p = (corner.x < 0.5 ? s0 : s1) + n * corner.y * hw;
+  vz = min(q0.z, q1.z);
+  gl_Position = vec4(p.x / res.x * 2. - 1., 1. - p.y / res.y * 2., 0., 1.);
+}`, `precision mediump float; varying float vz; uniform vec4 color; void main(){ if (vz < 0.0) discard; gl_FragColor = vec4(color.rgb, color.a * smoothstep(0.0, 0.12, vz)); }`);
+// géométrie plate : 4 sommets par segment (a0, a1, corner), indices 16 bits par blocs de 16 000 segments
+const CHUNK = 16000;
+const lineSets = [];                       // { chunks: [{ vb, ib, n }], color, width }
+function addLines(lines, color, width) {
+  const segs = [];
+  for (const L of lines) for (let j = 0; j + 1 < L.n; j++) segs.push(L.x[j], L.y[j], L.z[j], L.x[j + 1], L.y[j + 1], L.z[j + 1]);
+  const total = segs.length / 6, chunks = [];
+  for (let c0 = 0; c0 < total; c0 += CHUNK) {
+    const n = Math.min(CHUNK, total - c0), v = new Float32Array(n * 4 * 8), ix = new Uint16Array(n * 6);
+    for (let i = 0; i < n; i++) {
+      const s = (c0 + i) * 6;
+      for (let k = 0; k < 4; k++) { const o = (i * 4 + k) * 8; v[o] = segs[s]; v[o + 1] = segs[s + 1]; v[o + 2] = segs[s + 2]; v[o + 3] = segs[s + 3]; v[o + 4] = segs[s + 4]; v[o + 5] = segs[s + 5]; v[o + 6] = k >> 1; v[o + 7] = (k & 1) ? 1 : -1; }
+      const b = i * 4, q = i * 6; ix[q] = b; ix[q + 1] = b + 1; ix[q + 2] = b + 2; ix[q + 3] = b + 2; ix[q + 4] = b + 1; ix[q + 5] = b + 3;
+    }
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, ix, gl.STATIC_DRAW);
+    chunks.push({ vb, ib, n });
+  }
+  lineSets.push({ chunks, color, width });
+}
+function drawLines(M, R, cxd, cyd, w, h) {
+  if (!lineSets.length) return;
+  gl.useProgram(LINE.p); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.uniformMatrix3fv(LINE.u.M, false, M); gl.uniform2f(LINE.u.res, w, h); gl.uniform2f(LINE.u.center, cxd, cyd); gl.uniform1f(LINE.u.R, R);
+  gl.enableVertexAttribArray(LINE.a.a0); gl.enableVertexAttribArray(LINE.a.a1); gl.enableVertexAttribArray(LINE.a.corner);
+  for (const s of lineSets) {
+    gl.uniform4fv(LINE.u.color, s.color); gl.uniform1f(LINE.u.hw, s.width * dpr / 2);
+    for (const c of s.chunks) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.vb);
+      gl.vertexAttribPointer(LINE.a.a0, 3, gl.FLOAT, false, 32, 0); gl.vertexAttribPointer(LINE.a.a1, 3, gl.FLOAT, false, 32, 12); gl.vertexAttribPointer(LINE.a.corner, 2, gl.FLOAT, false, 32, 24);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, c.ib);
+      gl.drawElements(gl.TRIANGLES, c.n * 6, gl.UNSIGNED_SHORT, 0);
+    }
+  }
+  gl.disableVertexAttribArray(LINE.a.a0); gl.disableVertexAttribArray(LINE.a.a1); gl.disableVertexAttribArray(LINE.a.corner);
+  gl.disable(gl.BLEND);
+}
+function drawGlobe(w, h, cxd, cyd, Rd) {
+  gl.useProgram(GLOBE.p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.enableVertexAttribArray(GLOBE.a.p); gl.vertexAttribPointer(GLOBE.a.p, 2, gl.FLOAT, false, 0, 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texFond); gl.uniform1i(GLOBE.u.fond, 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texMask); gl.uniform1i(GLOBE.u.mask, 1);
+  gl.uniform2f(GLOBE.u.res, w, h); gl.uniform2f(GLOBE.u.center, cxd - w / 2, h / 2 - cyd); gl.uniform1f(GLOBE.u.R, Rd);
+  gl.uniform1f(GLOBE.u.lon0, cam.lon); gl.uniform1f(GLOBE.u.lat0, cam.lat); gl.uniform1f(GLOBE.u.climate, world.climate || 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disableVertexAttribArray(GLOBE.a.p);
+}
+// matrice caméra : P (vecteur unitaire) → (X écran, Y écran, Z profondeur)
+function cameraMatrix() {
+  const c = Math.cos(cam.lon), s = Math.sin(cam.lon), cl = Math.cos(cam.lat), sl = Math.sin(cam.lat);
+  return new Float32Array([-s, -sl * c, cl * c,   c, -sl * s, cl * s,   0, cl, sl]);   // colonnes (column-major)
+}
 
 // ---------- données Terre ----------
-// terre.bin (grille de simulation), fond.png (remplissage), cotes.bin et niveaux.bin (lignes, int16 centièmes de degré)
+// terre.bin (grille de simulation), fond.png (classes), terres.bin (anneaux, 1/60°), cotes.bin et niveaux.bin (lignes, 1/100°)
 function parseLines(buf, withLevel) {
   const dv = new DataView(buf); const n = dv.getUint32(0, true); let o = 4; const out = [];
   for (let i = 0; i < n; i++) {
     let level = 0; if (withLevel) { level = dv.getUint8(o); o += 1; }
     const m = dv.getUint16(o, true); o += 2;
-    const lon = new Float32Array(m), cl = new Float32Array(m), sl = new Float32Array(m);
-    for (let j = 0; j < m; j++) { const la = dv.getInt16(o + 2, true) / 100 * DEG; lon[j] = dv.getInt16(o, true) / 100 * DEG; cl[j] = Math.cos(la); sl[j] = Math.sin(la); o += 4; }
-    out.push({ level, n: m, lon, cl, sl });
+    const x = new Float32Array(m), y = new Float32Array(m), z = new Float32Array(m);
+    for (let j = 0; j < m; j++) { const lo = dv.getInt16(o, true) / 100 * DEG, la = dv.getInt16(o + 2, true) / 100 * DEG; const cl = Math.cos(la); x[j] = cl * Math.cos(lo); y[j] = cl * Math.sin(lo); z[j] = Math.sin(la); o += 4; }
+    out.push({ level, n: m, x, y, z });
   }
+  return out;
+}
+function parseRings(buf) {
+  const dv = new DataView(buf); const n = dv.getUint32(0, true); let o = 4; const out = [];
+  for (let i = 0; i < n; i++) { const m = dv.getUint32(o, true); o += 4; const r = new Float32Array(m * 2); for (let j = 0; j < m; j++) { r[2 * j] = dv.getInt16(o, true) / 60; r[2 * j + 1] = dv.getInt16(o + 2, true) / 60; o += 4; } out.push(r); }
   return out;
 }
 const b64 = s => { const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
 async function loadAssets() {
   const E = window.DRAKAR_DATA;                        // version autonome (demo.html) : données inlinées
   const get = async (name) => E ? b64(E[name]) : await (await fetch('/' + name)).arrayBuffer();
-  const [terre, cotes, niveaux] = await Promise.all([get('terre.bin'), get('cotes.bin'), get('niveaux.bin')]);
+  const [terre, terres, cotes, niveaux] = await Promise.all([get('terre.bin'), get('terres.bin'), get('cotes.bin'), get('niveaux.bin')]);
   const img = new Image(); img.src = E ? 'data:image/png;base64,' + E['fond.png'] : '/fond.png';
   await img.decode();
-  return { terre, img, cotes: parseLines(cotes, false), niveaux: parseLines(niveaux, true) };
+  uploadFond(img);
+  buildMask(parseRings(terres));
+  const niv = parseLines(niveaux, true);
+  for (let lv = 0; lv < 5; lv++) addLines(niv.filter(L => L.level === lv), [0.79, 0.76, 0.70, 0.10 + lv * 0.05], 0.8);
+  addLines(parseLines(cotes, false), [0.79, 0.76, 0.70, 0.55], 1.2);
+  return { terre };
 }
-let LINES = null;
 
 // ---------- caméra ----------
 const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
@@ -181,7 +283,6 @@ function resize() {
   dpr = Math.min(2, devicePixelRatio || 1);
   cw = innerWidth; ch = innerHeight;
   gcv.width = ocv.width = cw * dpr; gcv.height = ocv.height = ch * dpr;
-  gl.viewport(0, 0, gcv.width, gcv.height);
 }
 addEventListener('resize', resize); resize();
 function layout() {
@@ -221,37 +322,6 @@ function geodesic(ax, ay, bx, by, steps) {
     pts.push(p ? [p.x, p.y] : null);
   }
   return pts;
-}
-// trace une ligne précalculée (cos/sin lat) avec coupure sur la face cachée
-function traceLine(g, L) {
-  const cl0 = Math.cos(cam.lat), sl0 = Math.sin(cam.lat);
-  let on = false;
-  for (let j = 0; j < L.n; j++) {
-    const dl = L.lon[j] - cam.lon, cd = Math.cos(dl);
-    const cosc = sl0 * L.sl[j] + cl0 * L.cl[j] * cd;
-    if (cosc < 0.02) { on = false; continue; }
-    const x = cx + R * L.cl[j] * Math.sin(dl), y = cy - R * (cl0 * L.sl[j] - sl0 * L.cl[j] * cd);
-    if (!on) { g.moveTo(x, y); on = true; } else g.lineTo(x, y);
-  }
-}
-// calque des côtes et courbes de niveau, redessiné seulement quand la caméra change
-const linesCv = document.createElement('canvas'); const lctx = linesCv.getContext('2d');
-let linesKey = '', linesAt = 0;
-function linesLayer(now) {
-  const key = `${cam.lon.toFixed(5)}|${cam.lat.toFixed(5)}|${R.toFixed(1)}|${cw}x${ch}|${dpr}`;
-  if (key === linesKey) return linesCv;
-  if (!(drag || pinch) && now - linesAt < 100) return linesCv;      // en dérive lente, 10 Hz suffisent
-  linesKey = key; linesAt = now;
-  if (linesCv.width !== cw * dpr || linesCv.height !== ch * dpr) { linesCv.width = cw * dpr; linesCv.height = ch * dpr; }
-  lctx.setTransform(dpr, 0, 0, dpr, 0, 0); lctx.clearRect(0, 0, cw, ch);
-  const zf = Math.min(1, 0.55 + cam.zoom * 0.25);
-  for (let lv = 0; lv < 5; lv++) {
-    lctx.strokeStyle = `rgba(201,194,178,${(0.07 + lv * 0.035) * zf})`; lctx.lineWidth = 0.6;
-    lctx.beginPath(); for (const L of LINES.niveaux) if (L.level === lv) traceLine(lctx, L); lctx.stroke();
-  }
-  lctx.strokeStyle = 'rgba(201,194,178,.42)'; lctx.lineWidth = 0.8;
-  lctx.beginPath(); for (const L of LINES.cotes) traceLine(lctx, L); lctx.stroke();
-  return linesCv;
 }
 function strokePath(pts) {
   let on = false;
@@ -316,9 +386,9 @@ function frame(now) {
   }
   layout();
 
-  gl.uniform2f(U('res'), cw, ch); gl.uniform2f(U('center'), cx - cw / 2, ch / 2 - cy); gl.uniform1f(U('R'), R);
-  gl.uniform1f(U('lon0'), cam.lon); gl.uniform1f(U('lat0'), cam.lat); gl.uniform1f(U('climate'), world.climate || 0); gl.uniform1f(U('time'), now / 1000);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.viewport(0, 0, gcv.width, gcv.height);
+  drawGlobe(cw * dpr, ch * dpr, cx * dpr, cy * dpr, R * dpr);
+  drawLines(cameraMatrix(), R * dpr, cx * dpr, cy * dpr, cw * dpr, ch * dpr);
 
   octx.setTransform(dpr, 0, 0, dpr, 0, 0); octx.clearRect(0, 0, cw, ch);
   const o = {};
@@ -349,7 +419,6 @@ function frame(now) {
   if (lease) regionBox(lease.unit.region, 'rgba(217,168,92,.6)', [3, 5]);
 
   // relief : courbes de niveau (500 · 1000 · 2000 · 3000 · 4000 m), puis côtes
-  if (LINES) { const lc = linesLayer(now); octx.setTransform(1, 0, 0, 1, 0, 0); octx.drawImage(lc, 0, 0); octx.setTransform(dpr, 0, 0, dpr, 0, 0); }
 
   // routes
   const byId = new Map(world.settlements.map(s => [s.id, s]));
@@ -481,7 +550,7 @@ async function runUnit(unit, verify, onDone, onProgress) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function loopServer() {
-  const A = await loadAssets(); T = S.loadTerrain(A.terre); uploadFond(A.img); LINES = A;
+  const A = await loadAssets(); T = S.loadTerrain(A.terre);
   let sock = null, backoff = 1000, waiting = null;
   const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
   const connect = () => new Promise(resolve => {
@@ -531,7 +600,7 @@ function syntheticMarket(day) {
   return { date: new Date(day).toISOString().slice(0, 10), close: Math.round(v * 100) / 100, prev, change: ((v - prev) / prev) * 100, source: 'synthétique' };
 }
 async function loopDemo() {
-  const A = await loadAssets(); T = S.loadTerrain(A.terre); uploadFond(A.img); LINES = A;
+  const A = await loadAssets(); T = S.loadTerrain(A.terre);
   const w = S.World.create(20261007, T);
   const t = Date.now() - 37 * 86400000, gap = 3 * 3600000;
   w.s.created = t; w.s.chronicle[0].t = t;
