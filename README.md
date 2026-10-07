@@ -39,6 +39,9 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   l'indice lui-même étant payant) en REST au démarrage et toutes les 10 min, puis **trades en direct par
   WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
   seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
+- `tools/build-icons.mjs` — rend `public/icons/icon.svg` en PNG 32 / 180 / 192 / 512 (`npm run build:icons`, nécessite
+  `playwright` installé globalement ou en dev). `favicon.svg` est la variante sans fond pour l'onglet ;
+  `manifest.webmanifest` permet l'ajout à l'écran d'accueil en plein écran.
 - `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
 - `public/index.html` — tout le géographique est rendu par le GPU dans une seule passe WebGL : le disque et
   les classes de terrain (`fond.png`), les **terres** (anneaux Natural Earth remplis par parité de stencil

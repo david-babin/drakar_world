@@ -11,7 +11,8 @@
     "start": "node --no-warnings --env-file-if-exists=.env server.js",
     "test": "node test/sim.test.mjs",
     "demo": "node build-demo.mjs",
-    "build:terre": "node tools/build-terre.mjs"
+    "build:terre": "node tools/build-terre.mjs",
+    "build:icons": "node tools/build-icons.mjs"
   },
   "devDependencies": {
     "d3-contour": "^4.0.2",

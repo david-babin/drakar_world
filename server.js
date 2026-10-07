@@ -47,7 +47,7 @@ setInterval(save, 5000).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { save(true); market.stop(); db.close(); process.exit(0); });
 
 // ---------- HTTP (statique + API de lecture) ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
+const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
 
 const server = http.createServer((req, res) => {
@@ -63,7 +63,8 @@ const server = http.createServer((req, res) => {
     p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
     const file = path.join(__dirname, 'public', p);
     if (!file.startsWith(path.join(__dirname, 'public')) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('404'); }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
+    const ext = path.extname(file), longLived = ['.png', '.svg', '.bin', '.woff2'].includes(ext);
+    res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': longLived ? 'public, max-age=86400' : 'no-cache' });
     fs.createReadStream(file).pipe(res);
   } catch (e) { console.error(e); json(res, 500, { error: String(e.message || e) }); }
 });
