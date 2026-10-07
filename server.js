@@ -20,6 +20,7 @@ const VERIFY_EVERY = 7;                       // 1 unité sur 7 est recalculée 
 const SNAPSHOT_MS = 3600_000;
 
 // ---------- persistance ----------
+fs.mkdirSync(path.dirname(DB), { recursive: true });
 const db = new DatabaseSync(DB);
 db.exec(`
   PRAGMA journal_mode = WAL;
