@@ -9,24 +9,26 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0b1015; --ink: #c9c2b2; --dim: #6c6a60; --faint: #3a3d3f; --line: #1d2429;
-  --sea: #0c141b; --shoal: #121e28; --land: #1e2528; --hill: #2a3133; --peak: #383f40;
-  --accent: #d9a85c; --mono: 'IBM Plex Mono', ui-monospace, monospace; --serif: 'Cormorant Garamond', Georgia, serif;
+  --bg: #07090c; --ink: #c9c2b2; --dim: #6c6a60; --faint: #3a3d3f; --line: #1d2429; --accent: #d9a85c;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace; --serif: 'Cormorant Garamond', Georgia, serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
 body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spacing: .02em; }
-#map { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#globe { cursor: grab; } #globe.drag { cursor: grabbing; }
+#over { pointer-events: none; }
 #veil { position: fixed; inset: 0; background: var(--bg); pointer-events: none; transition: opacity 2.4s ease; }
 .hud { position: fixed; pointer-events: none; color: var(--dim); line-height: 1.7; }
 .hud b { color: var(--ink); font-weight: 400; }
 .hud i { color: var(--accent); font-style: normal; }
-#brand { left: 20px; bottom: 16px; font-family: var(--serif); font-size: 28px; letter-spacing: .14em; color: var(--ink); text-transform: lowercase; font-weight: 400; }
+.hud i.dn { color: #7fa3c4; }
+#brand { left: 20px; bottom: 16px; font-family: var(--serif); font-size: 28px; letter-spacing: .14em; color: var(--ink); font-weight: 400; }
 #brand small { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .18em; color: var(--dim); margin-top: -2px; }
 #era { left: 20px; top: 16px; font-family: var(--serif); font-size: 15px; letter-spacing: .08em; color: var(--ink); }
 #era small { display: block; font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: .1em; margin-top: 2px; }
 #tele { right: 20px; top: 16px; text-align: right; white-space: pre; }
-#chron { right: 20px; bottom: 16px; width: 290px; max-height: 42vh; overflow: hidden; text-align: right;
+#chron { right: 20px; bottom: 16px; width: 300px; max-height: 40vh; overflow: hidden; text-align: right;
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%); mask-image: linear-gradient(to bottom, transparent, #000 35%); }
 #chron div { padding: 1px 0; opacity: .85; }
 #chron div.new { animation: rise 1.4s ease both; }
@@ -36,13 +38,14 @@ body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spaci
 #status { left: 20px; bottom: 76px; }
 #status .bar { display: inline-block; width: 120px; height: 2px; background: var(--line); vertical-align: middle; margin-left: 8px; }
 #status .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .12s linear; }
-#tip { position: fixed; pointer-events: none; padding: 6px 9px; background: rgba(11,16,21,.92); border: 1px solid var(--line); color: var(--ink); display: none; white-space: nowrap; }
+#tip { position: fixed; pointer-events: none; padding: 6px 9px; background: rgba(7,9,12,.92); border: 1px solid var(--line); color: var(--ink); display: none; white-space: nowrap; }
 #tip small { color: var(--dim); display: block; }
 @media (max-width: 720px) { #tele, #chron { display: none; } #brand { font-size: 22px; } body { font-size: 10px; } }
 </style>
 </head>
 <body>
-<canvas id="map"></canvas>
+<canvas id="globe"></canvas>
+<canvas id="over"></canvas>
 <div id="veil"></div>
 
 <div id="era" class="hud">An —<small>—</small></div>
@@ -54,9 +57,10 @@ body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spaci
 
 <script type="module">
 import * as S from './sim.js';
-const { W, H, RX, RY, RW, RH, STEPS, REGION_NAMES, ROMAN } = S;
+const { W, H, RX, RY, RW, RH, STEPS, ROMAN } = S;
+const DEG = Math.PI / 180;
 
-// ---------- identité du visiteur : un sigle dérivé de la machine, stable ----------
+// ---------- identité du visiteur ----------
 function sigil() {
   try { const s = localStorage.getItem('drakar.sigil'); if (s) return s; } catch {}
   const src = [navigator.hardwareConcurrency, navigator.deviceMemory, screen.width, screen.height, screen.colorDepth,
@@ -69,139 +73,301 @@ function sigil() {
 const ME = sigil();
 
 // ---------- télémétrie machine ----------
-const tele = {
-  cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0, gpu: '—', batt: null, net: null,
-  fps: 0, dps: 0, latency: 0, units: 0, ticks: 0, decisions: 0,
-};
+const tele = { cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0, gpu: '—', batt: null, net: null, fps: 0, dps: 0, units: 0, ticks: 0, decisions: 0 };
 (async () => {
-  try { const c = document.createElement('canvas'); const gl = c.getContext('webgl'); const d = gl?.getExtension('WEBGL_debug_renderer_info');
-    if (d) tele.gpu = gl.getParameter(d.UNMASKED_RENDERER_WEBGL).replace(/ANGLE \((.*)\)/, '$1').split(',')[1]?.trim() || gl.getParameter(d.UNMASKED_RENDERER_WEBGL); } catch {}
   try { const b = await navigator.getBattery?.(); if (b) { const u = () => tele.batt = { level: b.level, charging: b.charging }; u(); b.onlevelchange = b.onchargingchange = u; } } catch {}
   try { const n = navigator.connection; if (n) { const u = () => tele.net = { type: n.effectiveType, rtt: n.rtt }; u(); n.onchange = u; } } catch {}
 })();
 
 // ---------- état ----------
 const DEMO = !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');
-let world = null, T = null, online = 1;
-let lease = null;      // { unit, agents (animés), step, t0, verify }
-let hover = null;
+let world = null, T = null, online = 1, lease = null;
 const chron = document.getElementById('chron');
+const $ = id => document.getElementById(id);
 
-// ---------- rendu ----------
-const cv = document.getElementById('map'), ctx = cv.getContext('2d');
-let dpr = 1, sx = 1, sy = 1, ox = 0, oy = 0, terrainLayer = null;
+// ---------- globe WebGL ----------
+const gcv = $('globe'), ocv = $('over'), octx = ocv.getContext('2d');
+const gl = gcv.getContext('webgl', { antialias: true, alpha: false, premultipliedAlpha: false });
+const VS = `attribute vec2 p; varying vec2 v; void main(){ v = p; gl_Position = vec4(p, 0., 1.); }`;
+const FS = `
+precision highp float;
+varying vec2 v;
+uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate; uniform float time;
+uniform sampler2D tex; uniform vec2 texel;
+const float PI = 3.14159265;
+vec3 colType(float t, float f) {
+  if (t < 0.5) return vec3(0.047, 0.078, 0.106);
+  if (t < 1.5) return vec3(0.071, 0.118, 0.157);
+  if (t < 2.5) return mix(vec3(0.118, 0.145, 0.157), vec3(0.145, 0.180, 0.165), f);
+  if (t < 3.5) return vec3(0.165, 0.192, 0.200);
+  if (t < 4.5) return vec3(0.220, 0.247, 0.251);
+  return vec3(0.135, 0.165, 0.19);
+}
+float typeAt(vec2 uv) { return floor(texture2D(tex, vec2(fract(uv.x), uv.y)).r * 255. + .5); }
+void main() {
+  vec2 px = v * res * .5;                       // pixels depuis le centre de l'écran
+  vec2 q = (px - center) / R;                   // coordonnées sur le disque
+  float d2 = dot(q, q);
+  vec3 bg = vec3(0.027, 0.035, 0.047);
+  float tint = climate;                         // ambre si expansion, bleu si contraction
+  vec3 glowC = tint >= 0. ? vec3(0.85, 0.66, 0.36) : vec3(0.50, 0.64, 0.77);
+  if (d2 > 1.0) {
+    float d = sqrt(d2);
+    float halo = exp(-(d - 1.0) * 14.0) * (0.10 + 0.10 * abs(tint));
+    gl_FragColor = vec4(bg + glowC * halo, 1.); return;
+  }
+  float z = sqrt(1.0 - d2);
+  float cl0 = cos(lat0), sl0 = sin(lat0);
+  float lat = asin(clamp(q.y * cl0 + z * sl0, -1., 1.));
+  float lon = lon0 + atan(q.x, cl0 * z - q.y * sl0);
+  vec2 uv = vec2(mod(lon / (2. * PI) + .5, 1.), 0.5 - lat / PI);
+  vec4 s = texture2D(tex, uv);
+  float t = floor(s.r * 255. + .5), f = s.g;
+  vec3 c = colType(t, f);
+  // contours : changement de type avec les voisins
+  // contours à épaisseur constante (~1.2 px) : on ne colore que la bordure du texel
+  vec2 fr = fract(uv / texel);
+  float lw = clamp(1.2 / (R * 6.2832 / 384.0 * max(z, 0.25)), 0.04, 0.5);
+  float tE = typeAt(uv + vec2(texel.x, 0.)), tW = typeAt(uv - vec2(texel.x, 0.));
+  float tS = typeAt(uv + vec2(0., texel.y)), tN = typeAt(uv - vec2(0., texel.y));
+  float edge = 0.;
+  float wE = (t >= 2. || tE >= 2.) ? 0.34 : 0.10, wW = (t >= 2. || tW >= 2.) ? 0.34 : 0.10;
+  float wS = (t >= 2. || tS >= 2.) ? 0.34 : 0.10, wN = (t >= 2. || tN >= 2.) ? 0.34 : 0.10;
+  if (tE != t && fr.x > 1. - lw) edge = max(edge, wE);
+  if (tW != t && fr.x < lw) edge = max(edge, wW);
+  if (tS != t && fr.y > 1. - lw) edge = max(edge, wS);
+  if (tN != t && fr.y < lw) edge = max(edge, wN);
+  if (t == 5. || tE == 5. || tW == 5. || tS == 5. || tN == 5.) edge *= 0.35;   // la glace reste discrète
+  c = mix(c, vec3(0.79, 0.76, 0.70), edge);
+  // graticule 15°
+  float gla = abs(fract(lat / PI * 12. + .5) - .5), glo = abs(fract(lon / PI * 12. + .5) - .5);
+  float gw = 0.012 * (1.0 + 3.0 * (1.0 - z));
+  float grat = (1.0 - smoothstep(0.0, gw, gla)) + (1.0 - smoothstep(0.0, gw, glo));
+  c += vec3(0.79, 0.76, 0.70) * grat * 0.045;
+  // relief : limbe assombri, lumière rasante
+  float shade = 0.55 + 0.45 * pow(z, 0.6);
+  c *= shade;
+  c += glowC * (0.05 * abs(tint)) * (1.0 - z);  // saison
+  float aa = smoothstep(1.0, 1.0 - 2.0 / R, d2);
+  gl_FragColor = vec4(mix(bg, c, aa), 1.);
+}`;
+function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram(); gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = n => gl.getUniformLocation(prog, n);
+const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+function uploadTerrain() {
+  const data = new Uint8Array(W * H * 4);
+  for (let k = 0; k < W * H; k++) { data[k * 4] = T.type[k]; data[k * 4 + 1] = T.fert[k]; data[k * 4 + 2] = T.coast[k] * 255; data[k * 4 + 3] = 255; }
+  gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  gl.uniform2f(U('texel'), 1 / W, 1 / H);
+}
+
+// ---------- caméra ----------
+const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0 };
+let dpr = 1, cw = 0, ch = 0, R = 0, cx = 0, cy = 0;
 function resize() {
   dpr = Math.min(2, devicePixelRatio || 1);
-  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
-  const s = Math.max(innerWidth / W, innerHeight / H);
-  sx = sy = s; ox = (innerWidth - W * s) / 2; oy = (innerHeight - H * s) / 2;
-  terrainLayer = null;
+  cw = innerWidth; ch = innerHeight;
+  gcv.width = ocv.width = cw * dpr; gcv.height = ocv.height = ch * dpr;
+  gl.viewport(0, 0, gcv.width, gcv.height);
 }
 addEventListener('resize', resize); resize();
-const px = x => ox + x * sx, py = y => oy + y * sy;
-const hue = lin => world?.lineages[lin]?.hue ?? 0;
-
-function drawTerrain() {
-  const c = document.createElement('canvas'); c.width = cv.width; c.height = cv.height;
-  const g = c.getContext('2d'); g.scale(dpr, dpr);
-  const css = getComputedStyle(document.documentElement);
-  const col = { 0: css.getPropertyValue('--sea'), 1: css.getPropertyValue('--shoal'), 2: css.getPropertyValue('--land'), 3: css.getPropertyValue('--hill'), 4: css.getPropertyValue('--peak') };
-  g.fillStyle = col[0]; g.fillRect(0, 0, innerWidth, innerHeight);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const t = T.type[y * W + x]; if (t === 0) continue;
-    g.fillStyle = col[t]; g.fillRect(px(x), py(y), sx + .5, sy + .5);
+function layout() {
+  R = Math.min(cw, ch) * 0.42 * cam.zoom;
+  cx = cw > 900 ? cw * 0.46 : cw / 2; cy = ch / 2;
+}
+// projection orthographique : grille → écran ; retourne null si face cachée
+const sinLat = new Float64Array(H), cosLat = new Float64Array(H);
+for (let y = 0; y < H; y++) { const l = S.latOf(y) * DEG; sinLat[y] = Math.sin(l); cosLat[y] = Math.cos(l); }
+function project(x, y, out) {
+  const lon = S.lonOf(x) * DEG, dl = lon - cam.lon;
+  const cl0 = Math.cos(cam.lat), sl0 = Math.sin(cam.lat);
+  const cosc = sl0 * sinLat[y] + cl0 * cosLat[y] * Math.cos(dl);
+  if (cosc < 0) return null;
+  out.x = cx + R * cosLat[y] * Math.sin(dl);
+  out.y = cy - R * (cl0 * sinLat[y] - sl0 * cosLat[y] * Math.cos(dl));
+  out.c = cosc;
+  return out;
+}
+function projectLL(lon, lat, out) {
+  const dl = lon - cam.lon, cl0 = Math.cos(cam.lat), sl0 = Math.sin(cam.lat);
+  const cosc = sl0 * Math.sin(lat) + cl0 * Math.cos(lat) * Math.cos(dl);
+  out.x = cx + R * Math.cos(lat) * Math.sin(dl); out.y = cy - R * (cl0 * Math.sin(lat) - sl0 * Math.cos(lat) * Math.cos(dl)); out.c = cosc;
+  return cosc >= 0 ? out : null;
+}
+// arc de grand cercle entre deux cellules (slerp), tracé par segments visibles
+function geodesic(ax, ay, bx, by, steps) {
+  const la = S.lonOf(ax) * DEG, pa = S.latOf(ay) * DEG, lb = S.lonOf(bx) * DEG, pb = S.latOf(by) * DEG;
+  const A = [Math.cos(pa) * Math.cos(la), Math.cos(pa) * Math.sin(la), Math.sin(pa)], B = [Math.cos(pb) * Math.cos(lb), Math.cos(pb) * Math.sin(lb), Math.sin(pb)];
+  const d = Math.acos(Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2]))) || 1e-6;
+  const n = Math.max(2, Math.min(steps, Math.ceil(d / (2 * DEG))));
+  const pts = [], o = {};
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, s1 = Math.sin((1 - t) * d) / Math.sin(d), s2 = Math.sin(t * d) / Math.sin(d);
+    const x = s1 * A[0] + s2 * B[0], y = s1 * A[1] + s2 * B[1], z = s1 * A[2] + s2 * B[2];
+    const p = projectLL(Math.atan2(y, x), Math.asin(z), o);
+    pts.push(p ? [p.x, p.y] : null);
   }
-  // isobathes & courbes de niveau : contours entre types
-  g.lineWidth = .7;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const k = y * W + x, t = T.type[k];
-    const r = x < W - 1 ? T.type[k + 1] : t, d = y < H - 1 ? T.type[k + W] : t;
-    if (r !== t) { g.strokeStyle = (t >= 2 || r >= 2) ? 'rgba(201,194,178,.28)' : 'rgba(201,194,178,.09)'; g.beginPath(); g.moveTo(px(x + 1), py(y)); g.lineTo(px(x + 1), py(y + 1)); g.stroke(); }
-    if (d !== t) { g.strokeStyle = (t >= 2 || d >= 2) ? 'rgba(201,194,178,.28)' : 'rgba(201,194,178,.09)'; g.beginPath(); g.moveTo(px(x), py(y + 1)); g.lineTo(px(x + 1), py(y + 1)); g.stroke(); }
+  return pts;
+}
+function strokePath(pts) {
+  let on = false;
+  for (const p of pts) {
+    if (!p) { on = false; continue; }
+    if (!on) { octx.moveTo(p[0], p[1]); on = true; } else octx.lineTo(p[0], p[1]);
   }
-  // graticule
-  g.strokeStyle = 'rgba(201,194,178,.05)'; g.lineWidth = .5;
-  for (let x = 0; x <= W; x += 12) { g.beginPath(); g.moveTo(px(x), 0); g.lineTo(px(x), innerHeight); g.stroke(); }
-  for (let y = 0; y <= H; y += 12) { g.beginPath(); g.moveTo(0, py(y)); g.lineTo(innerWidth, py(y)); g.stroke(); }
-  // numéros de régions
-  g.font = `500 ${Math.max(12, sy * 3)}px Cormorant Garamond, serif`; g.fillStyle = 'rgba(201,194,178,.14)'; g.textAlign = 'right';
-  for (let i = 0; i < RX * RY; i++) g.fillText(ROMAN[i], px((i % RX + 1) * RW) - 8, py(Math.floor(i / RX) * RH) + 8 + sy * 3);
-  return c;
 }
 
-let last = performance.now(), frames = 0, fpsAt = last;
+// ---------- interactions ----------
+let drag = null;
+gcv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, lon: cam.lon, lat: cam.lat, t: performance.now() }; cam.vlon = cam.vlat = 0; gcv.classList.add('drag'); gcv.setPointerCapture(e.pointerId); });
+gcv.addEventListener('pointermove', e => {
+  if (drag) {
+    const k = 1 / R;
+    const nlon = drag.lon - (e.clientX - drag.x) * k, nlat = Math.max(-80 * DEG, Math.min(80 * DEG, drag.lat + (e.clientY - drag.y) * k));
+    cam.vlon = (nlon - cam.lon) * 0.5; cam.vlat = (nlat - cam.lat) * 0.5;
+    cam.lon = nlon; cam.lat = nlat; cam.idle = 0;
+  } else hoverAt(e.clientX, e.clientY);
+});
+const endDrag = () => { drag = null; gcv.classList.remove('drag'); };
+gcv.addEventListener('pointerup', endDrag); gcv.addEventListener('pointercancel', endDrag);
+gcv.addEventListener('wheel', e => { e.preventDefault(); cam.zoom = Math.max(0.6, Math.min(4, cam.zoom * Math.exp(-e.deltaY * 0.0012))); cam.idle = 0; }, { passive: false });
+let pinch = null;
+gcv.addEventListener('touchstart', e => { if (e.touches.length === 2) pinch = { d: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY), z: cam.zoom }; }, { passive: true });
+gcv.addEventListener('touchmove', e => { if (pinch && e.touches.length === 2) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); cam.zoom = Math.max(0.6, Math.min(4, pinch.z * d / pinch.d)); } }, { passive: true });
+gcv.addEventListener('touchend', () => pinch = null);
+gcv.addEventListener('mouseleave', () => tip.style.display = 'none');
+
+// ---------- rendu ----------
+const hue = lin => world?.lineages[lin]?.hue ?? 0;
+let last = performance.now(), frames = 0, fpsAt = last, hits = [];
 function frame(now) {
   requestAnimationFrame(frame);
   if (!world) return;
-  if (!terrainLayer) terrainLayer = drawTerrain();
   frames++; if (now - fpsAt > 1000) { tele.fps = frames; frames = 0; fpsAt = now; }
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(terrainLayer, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // inertie et rotation lente au repos
+  if (!drag) {
+    cam.lon += cam.vlon; cam.lat = Math.max(-80 * DEG, Math.min(80 * DEG, cam.lat + cam.vlat));
+    cam.vlon *= 0.92; cam.vlat *= 0.92;
+    cam.idle++; if (cam.idle > 240) cam.lon += 0.00035 * Math.min(1, (cam.idle - 240) / 300);
+  }
+  layout();
 
-  // région en cours de calcul
-  if (lease) {
-    const u = lease.unit, x0 = px(u.rx * RW), y0 = py(u.ry * RH);
-    ctx.fillStyle = 'rgba(217,168,92,.045)'; ctx.fillRect(x0, y0, RW * sx, RH * sy);
-    ctx.strokeStyle = 'rgba(217,168,92,.55)'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.lineDashOffset = -now / 40;
-    ctx.strokeRect(x0 + .5, y0 + .5, RW * sx - 1, RH * sy - 1); ctx.setLineDash([]);
+  gl.uniform2f(U('res'), cw, ch); gl.uniform2f(U('center'), cx - cw / 2, ch / 2 - cy); gl.uniform1f(U('R'), R);
+  gl.uniform1f(U('lon0'), cam.lon); gl.uniform1f(U('lat0'), cam.lat); gl.uniform1f(U('climate'), world.climate || 0); gl.uniform1f(U('time'), now / 1000);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0); octx.clearRect(0, 0, cw, ch);
+  const o = {};
+  hits = [];
+
+  // régions en cours de calcul (contour lat/lon)
+  const regionBox = (reg, color, dash) => {
+    const rx = reg % RX, ry = Math.floor(reg / RX);
+    const x0 = rx * RW, y0 = ry * RH, x1 = x0 + RW, y1 = y0 + RH;
+    const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+    octx.strokeStyle = color; octx.lineWidth = 1; octx.setLineDash(dash); octx.lineDashOffset = -now / 40;
+    octx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = corners[i], [bx, by] = corners[i + 1], pts = [];
+      for (let j = 0; j <= 16; j++) { const x = ax + (bx - ax) * j / 16, y = ay + (by - ay) * j / 16; const p = projectLL(((x / W) * 360 - 180) * DEG, (90 - (y / H) * 180) * DEG, o); pts.push(p ? [p.x, p.y] : null); }
+      strokePath(pts);
+    }
+    octx.stroke(); octx.setLineDash([]);
+  };
+  for (const l of world.leased || []) if (l.sigil !== ME) regionBox(l.region, 'rgba(201,194,178,.22)', [2, 6]);
+  if (lease) regionBox(lease.unit.region, 'rgba(217,168,92,.6)', [3, 5]);
+
+  // routes
+  const byId = new Map(world.settlements.map(s => [s.id, s]));
+  octx.lineWidth = 0.9;
+  for (const r of world.routes) {
+    const a = byId.get(r.a), b = byId.get(r.b); if (!a || !b) continue;
+    const age = Math.min(1, (world.tick - r.tick) / 600);
+    octx.strokeStyle = `hsla(${hue(r.lin)},45%,70%,${0.18 + 0.3 * age})`;
+    octx.setLineDash(r.sea ? [2, 4] : []);
+    octx.beginPath(); strokePath(geodesic(a.x, a.y, b.x, b.y, 48)); octx.stroke();
   }
-  for (const l of world.leased || []) if (l.sigil !== ME) {
-    const x0 = px((l.region % RX) * RW), y0 = py(Math.floor(l.region / RX) * RH);
-    ctx.strokeStyle = 'rgba(201,194,178,.22)'; ctx.lineWidth = 1; ctx.setLineDash([2, 6]); ctx.strokeRect(x0 + .5, y0 + .5, RW * sx - 1, RH * sy - 1); ctx.setLineDash([]);
-  }
+  octx.setLineDash([]);
 
   // comptoirs
+  const showLabels = R > 420;
   for (const st of world.settlements) {
-    const x = px(st.x + .5), y = py(st.y + .5);
-    ctx.strokeStyle = `hsla(${hue(st.lin)},55%,62%,.9)`; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.rect(x - 2.5, y - 2.5, 5, 5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x, y - 2.5); ctx.lineTo(x, y - 7); ctx.stroke();
-    if (sx > 5) { ctx.font = '300 9px IBM Plex Mono'; ctx.fillStyle = 'rgba(201,194,178,.55)'; ctx.textAlign = 'left'; ctx.fillText(st.name, x + 6, y + 3); }
+    const p = project(st.x, st.y, o); if (!p) continue;
+    const a = 0.35 + 0.65 * p.c;
+    octx.strokeStyle = `hsla(${hue(st.lin)},55%,62%,${a})`; octx.lineWidth = 1;
+    octx.beginPath(); octx.rect(p.x - 2.5, p.y - 2.5, 5, 5); octx.stroke();
+    octx.beginPath(); octx.moveTo(p.x, p.y - 2.5); octx.lineTo(p.x, p.y - 7); octx.stroke();
+    if (showLabels && p.c > 0.35) { octx.font = '300 9px IBM Plex Mono'; octx.fillStyle = `rgba(201,194,178,${0.55 * p.c})`; octx.textAlign = 'left'; octx.fillText(st.name, p.x + 6, p.y + 3); }
+    hits.push({ x: p.x, y: p.y, st });
   }
 
-  // groupes : ceux de la région qu'on calcule sont animés, les autres figés
-  const animatedIds = lease ? new Set(lease.agents.map(a => a.id)) : null;
+  // groupes
+  const animated = lease ? new Set(lease.agents.map(a => a.id)) : null;
   const drawAgent = (a, alpha) => {
-    const x = px(a.x + .5), y = py(a.y + .5), r = Math.min(4.5, 1.2 + Math.sqrt(a.pop) * .22);
-    ctx.fillStyle = `hsla(${hue(a.lin)},60%,66%,${alpha})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
-    if (a.dx || a.dy) { ctx.strokeStyle = `hsla(${hue(a.lin)},60%,66%,${alpha * .6})`; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + a.dx * (r + 3), y + a.dy * (r + 3)); ctx.stroke(); }
+    const p = project(a.x, a.y, o); if (!p) return;
+    const r = Math.min(4, 1 + Math.sqrt(a.pop) * .2) * (0.6 + 0.4 * p.c);
+    octx.fillStyle = `hsla(${hue(a.lin)},60%,66%,${alpha * (0.3 + 0.7 * p.c)})`;
+    octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
+    hits.push({ x: p.x, y: p.y, ag: a });
   };
-  for (const a of world.agents) if (!animatedIds || !animatedIds.has(a.id)) drawAgent(a, .78);
+  for (const a of world.agents) if (!animated || !animated.has(a.id)) drawAgent(a, .8);
   if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
 
   // mémoires : événements récents
   const t = Date.now();
   for (const e of world.chronicle.slice(-12)) if (e.x != null && t - e.t < 20000) {
-    const k = 1 - (t - e.t) / 20000, x = px(e.x + .5), y = py(e.y + .5);
-    ctx.strokeStyle = `hsla(${hue(e.lin)},60%,66%,${k * .5})`; ctx.lineWidth = .8;
-    ctx.beginPath(); ctx.arc(x, y, 6 + (1 - k) * 18, 0, 6.283); ctx.stroke();
+    const p = project(e.x, e.y, o); if (!p) continue;
+    const k = 1 - (t - e.t) / 20000;
+    octx.strokeStyle = `hsla(${hue(e.lin)},60%,66%,${k * .5})`; octx.lineWidth = .8;
+    octx.beginPath(); octx.arc(p.x, p.y, 6 + (1 - k) * 18, 0, 6.283); octx.stroke();
   }
 
   if (now - last > 250) { last = now; hud(); }
 }
 requestAnimationFrame(frame);
 
+// ---------- survol ----------
+const tip = $('tip');
+function hoverAt(mx, my) {
+  if (!world) return;
+  let best = null, bd = 64;
+  for (const h of hits) { const d = (h.x - mx) ** 2 + (h.y - my) ** 2; if (d < bd) { bd = d; best = h; } }
+  if (!best) { tip.style.display = 'none'; return; }
+  tip.style.display = 'block'; tip.style.left = mx + 14 + 'px'; tip.style.top = my + 14 + 'px';
+  if (best.st) { const st = best.st, n = world.routes.filter(r => r.a === st.id || r.b === st.id).length;
+    tip.innerHTML = `${st.name}<small>${world.lineages[st.lin].name} · fondée an ${Math.floor(st.founded / 4)} · ${n} route${n > 1 ? 's' : ''}${st.sigil ? ' · témoin ' + st.sigil : ''}</small>`; }
+  else { const ag = best.ag; tip.innerHTML = `lignée ${world.lineages[ag.lin].name}<small>${ag.pop} âmes · vivres ${Math.floor(ag.food)} · ${S.latOf(ag.y).toFixed(1)}° ${S.lonOf(ag.x).toFixed(1)}°<br>génome ${ag.g.map(v => v.toString(16).padStart(2, '0')).join('')}</small>`; }
+}
+
 // ---------- HUD ----------
-const $ = id => document.getElementById(id);
 const fmt = n => n.toLocaleString('fr-FR');
 function hud() {
   const pop = world.agents.reduce((n, a) => n + a.pop, 0);
   const alive = world.lineages.filter(l => !l.dead).length;
   const age = Math.max(0, Math.floor((Date.now() - world.created) / 86400000));
-  $('era').innerHTML = `An ${fmt(world.year)}<small>${fmt(pop)} âmes · ${world.settlements.length} comptoirs · ${alive} lignées · ${age} j</small>`;
+  $('era').innerHTML = `An ${fmt(world.year)}<small>${fmt(pop)} âmes · ${world.settlements.length} comptoirs · ${world.routes.length} routes · ${alive} lignées · ${age} j</small>`;
   const b = tele.batt ? `${Math.round(tele.batt.level * 100)}% ${tele.batt.charging ? '⚡' : ''}` : '—';
   const n = tele.net ? `${tele.net.type} ${tele.net.rtt}ms` : '—';
+  const m = world.market;
+  const mk = m ? `${m.close.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} <i class="${m.change < 0 ? 'dn' : ''}">${m.change >= 0 ? '▲' : '▼'} ${Math.abs(m.change).toFixed(2).replace('.', ',')} %</i>` : '—';
+  const season = world.climate > 0.25 ? 'abondance' : world.climate < -0.25 ? 'disette' : 'saison ordinaire';
   $('tele').innerHTML =
 `<b>${ME}</b>
-cpu <b>${tele.cores || '?'}</b> · mem <b>${tele.mem ? tele.mem + ' Go' : '?'}</b>
-${tele.gpu.slice(0, 30)}
+cpu <b>${tele.cores || '?'}</b> · mem <b>${tele.mem ? tele.mem + ' Go' : '?'}</b> · fps <b>${tele.fps}</b>
 batt <b>${b}</b> · net <b>${n}</b>
-fps <b>${tele.fps}</b> · <i>${fmt(tele.dps)} déc/s</i>
-unités <b>${tele.units}</b> · saisons <b>${fmt(tele.ticks)}</b>
+<i>${fmt(tele.dps)} déc/s</i> · unités <b>${tele.units}</b> · saisons <b>${fmt(tele.ticks)}</b>
 en ligne <b>${online}</b> · témoins <b>${world.contributors}</b>
-total <b>${fmt(world.totals.decisions)}</b> décisions`;
+total <b>${fmt(world.totals.decisions)}</b> décisions
+
+indice ${mk}
+climat <b>${season}</b>${m?.source === 'synthétique' ? ' · <i class="dn">flux simulé</i>' : ''}`;
   let st = '';
-  if (lease) st = `calcul · ${REGION_NAMES[lease.unit.region]} <i>${ROMAN[lease.unit.region]}</i><span class="bar"><i style="width:${(100 * lease.step / STEPS) | 0}%"></i></span>`;
+  if (lease) st = `calcul · région <i>${ROMAN[lease.unit.region]}</i><span class="bar"><i style="width:${(100 * lease.step / STEPS) | 0}%"></i></span>`;
   else if (DEMO) st = `mode démo · monde local`;
   else st = `synchronisation`;
   $('status').innerHTML = st;
@@ -214,43 +380,24 @@ function addChron(e, isNew) {
 function setWorld(w) {
   const first = !world;
   world = w;
-  if (!T || first) { T = S.makeTerrain(w.seed); terrainLayer = null; }
-  if (first) { chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
+  if (first) { T = S.makeTerrain(w.seed); uploadTerrain(); chron.innerHTML = ''; for (const e of w.chronicle.slice(-14)) addChron(e, false); $('veil').style.opacity = 0; }
 }
 
-// ---------- survol ----------
-const tip = $('tip');
-cv.addEventListener('mousemove', ev => {
-  if (!world) return;
-  const x = Math.floor((ev.clientX - ox) / sx), y = Math.floor((ev.clientY - oy) / sy);
-  const near = (a) => Math.abs(a.x - x) <= 1 && Math.abs(a.y - y) <= 1;
-  const st = world.settlements.find(near);
-  const ag = (lease?.agents || []).find(a => a.pop > 0 && near(a)) || world.agents.find(near);
-  if (!st && !ag) { tip.style.display = 'none'; return; }
-  tip.style.display = 'block'; tip.style.left = ev.clientX + 14 + 'px'; tip.style.top = ev.clientY + 14 + 'px';
-  if (st) tip.innerHTML = `${st.name}<small>${world.lineages[st.lin].name} · fondé an ${Math.floor(st.founded / 4)}${st.sigil ? ' · témoin ' + st.sigil : ''}</small>`;
-  else tip.innerHTML = `lignée ${world.lineages[ag.lin].name}<small>${ag.pop} âmes · vivres ${Math.floor(ag.food)} · génome ${ag.g.map(v => v.toString(16).padStart(2, '0')).join('')}</small>`;
-});
-cv.addEventListener('mouseleave', () => tip.style.display = 'none');
-
 // ---------- boucle de calcul ----------
-// Le navigateur demande une région, simule STEPS saisons en l'animant (budget ~8 ms/frame), renvoie.
 const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1.5));
 async function runUnit(unit, verify, onDone) {
   const gen = S.simulateUnitGen(T, unit);
   lease = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
   let lastDec = 0, lastT = performance.now();
-  const pace = Math.max(1, Math.round(STEPS / 240));   // ~4 s par unité à 60 fps
   await new Promise(resolve => {
     const tickFrame = () => {
       const start = performance.now();
       let r;
-      for (let i = 0; i < pace; i++) {
+      do {
         r = gen.next();
         if (r.done) break;
         lease.agents = r.value.agents; lease.step = r.value.step + 1;
-        if (performance.now() - start > budgetMs()) break;
-      }
+      } while (performance.now() - start < budgetMs() && lease.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
       if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
@@ -258,20 +405,18 @@ async function runUnit(unit, verify, onDone) {
     requestAnimationFrame(tickFrame);
   });
 }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function loopServer() {
   const es = new EventSource('/api/events');
   es.addEventListener('world', e => setWorld(JSON.parse(e.data)));
   es.addEventListener('chronicle', e => addChron(JSON.parse(e.data), true));
-  es.addEventListener('online', e => online = JSON.parse(e.data).online);
-  es.addEventListener('hello', e => online = JSON.parse(e.data).online);
-  es.addEventListener('ping', e => online = JSON.parse(e.data).online);
+  es.addEventListener('market', e => { const d = JSON.parse(e.data); if (world) { world.market = d.market; world.climate = d.climate; } });
+  for (const ev of ['online', 'hello', 'ping']) es.addEventListener(ev, e => online = JSON.parse(e.data).online);
   setWorld(await (await fetch('/api/world')).json());
   for (;;) {
     try {
-      const t0 = performance.now();
       const res = await fetch('/api/lease', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sigil: ME }) });
-      tele.latency = Math.round(performance.now() - t0);
       if (res.status === 204) { lease = null; await sleep(4000); continue; }
       const { unit, verify } = await res.json();
       await runUnit(unit, verify, async (result, ms) => {
@@ -280,20 +425,31 @@ async function loopServer() {
         if (r.ok) { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       });
       lease = null;
-      await sleep(900 + Math.random() * 1500);     // respiration entre deux unités
+      await sleep(900 + Math.random() * 1500);
     } catch (e) { lease = null; await sleep(5000); }
   }
 }
 
-// mode démo : le monde vit dans l'onglet (fichier ouvert sans serveur, ou ?demo)
+// mode démo : le monde vit dans l'onglet, avec un passé et un indice simulés
+function syntheticMarket(day) {
+  const d0 = Date.UTC(2026, 0, 1), n = Math.floor((day - d0) / 86400000);
+  let v = 6000, prev = 6000, seed = 0x2545F491;
+  const rnd = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return ((seed >>> 0) / 4294967296) - 0.5; };
+  for (let i = 0; i <= n; i++) { prev = v; v *= 1 + rnd() * 0.02 + 0.0003; }
+  return { date: new Date(day).toISOString().slice(0, 10), close: Math.round(v * 100) / 100, prev, change: ((v - prev) / prev) * 100, source: 'synthétique' };
+}
 async function loopDemo() {
   const w = S.World.create(20261007);
   const t = Date.now() - 37 * 86400000, gap = 3 * 3600000;
   w.s.created = t; w.s.chronicle[0].t = t;
-  // un passé : quelques unités calculées « par d'autres »
   const ghosts = ['K7QD-3MZA', 'B2VX-9HLP', 'ZQ0F-P1NR', 'H8WT-4ECS'];
-  for (let i = 0; i < 60; i++) { const g = ghosts[i % 4]; const at = t + (i < 24 ? i * gap : 19 * 86400000 + i * gap); const u = w.lease(g, at); if (u) w.integrate(S.simulateUnit(w.T, u), g, { now: at }); }
+  for (let i = 0; i < 96; i++) {
+    const g = ghosts[i % 4], at = t + (i < 24 ? i * gap : 19 * 86400000 + i * gap);
+    w.setMarket(syntheticMarket(at));
+    const u = w.lease(g, at); if (u) w.integrate(S.simulateUnit(w.T, u), g, { now: at });
+  }
   for (const c of w.s.chronicle) c.t = Math.min(c.t, Date.now() - 60000);
+  w.setMarket(syntheticMarket(Date.now()));
   online = 1 + Math.floor(Math.random() * 3);
   setWorld(w.snapshot(online));
   for (;;) {
@@ -303,7 +459,6 @@ async function loopDemo() {
     await sleep(900 + Math.random() * 1500);
   }
 }
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 (DEMO ? loopDemo : loopServer)();
 </script>
 </body>

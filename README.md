@@ -19,7 +19,11 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
   unités de travail, classe `World` : bail / intégration / chronique).
 - `server.js` — HTTP statique + API (`/api/world`, `/api/lease`, `/api/result`, `/api/events` en SSE,
   `/api/stats`), persistance SQLite (état courant, snapshots horaires, journal des unités).
-- `public/index.html` — carte canvas, HUD télémétrie, chronique, boucle de calcul.
+- `market.js` — l'indice S&P 500 comme climat : Stooq → Yahoo → FRED (sans clé), cache SQLite,
+  repli sur une marche aléatoire datée si aucune source ne répond. Rafraîchi toutes les 30 min.
+- `public/index.html` — globe WebGL (projection orthographique dans le shader, terrain en texture),
+  couche vectorielle canvas (groupes, comptoirs, routes en arcs de grand cercle, régions), HUD, chronique,
+  boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer ; rotation lente au repos.
 
 ### Protocole
 
@@ -30,10 +34,26 @@ Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'
    état à tous les onglets. Une unité sur 7 est recalculée côté serveur (déterminisme → même hash,
    sinon rejet).
 
+### Climat = marché
+
+Le serveur lit la variation journalière de l'indice et la convertit en `climate ∈ [-1, 1]`
+(`variation % / 1,5`). Cette valeur est **embarquée dans chaque unité de travail**, donc la
+simulation reste déterministe et vérifiable. Effets : rendement des terres × (1 + 0,45 climat),
+famine plus douce ou plus dure, scissions facilitées en expansion, razzias plus fréquentes en
+contraction, portée des routes ± 25 %. Le halo du globe vire à l'ambre en hausse, au bleu en baisse.
+
+### Routes
+
+Un comptoir vieux de 40 saisons s'ouvre vers le comptoir non relié le plus proche, dans une portée qui
+grandit avec l'âge du monde (14 → 70 cellules). Entre lignées différentes, seulement après 200 saisons.
+Une route qui traverse la mer est « maritime » (pointillés). Chaque route ajoute +12 % de rendement
+au comptoir (max 4).
+
 ### Règles de vie (v0)
 
 - La terre produit, pas les bras : `vivres += fertilité × 2 × min(pop, capacité) − pop`. Une cellule se partage.
 - Un comptoir (fondé après 24 saisons de sédentarité sur une terre fertile) multiplie la production par 1,6.
+- Sphère : grille 384 × 192 bouclée en longitude, 24 régions, pôles gelés, fertilité décroissante au-delà de 45°.
 - Génome 8 octets : seuil de faim, attrait de la fertilité, agressivité, errance, seuil de fondation,
   taille de scission, goût du littoral, taux de mutation. Hérité à la scission, muté.
 - Pas de sélection explicite : ce qui survit se transmet.
