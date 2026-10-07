@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { World, hashStr, ROMAN } from './public/sim.js';
+import { World, hashStr, loadTerrain } from './public/sim.js';
 import { createMarket } from './market.js';
 import { attachWebSocket } from './ws-mini.js';
 
@@ -27,8 +27,9 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, taken_at INTEGER NOT NULL, tick INTEGER NOT NULL, state TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, region INTEGER NOT NULL, tick INTEGER NOT NULL, sigil TEXT NOT NULL, hash TEXT NOT NULL, verified INTEGER NOT NULL, ok INTEGER NOT NULL, ms INTEGER, climate REAL);
 `);
+const TERRE = loadTerrain(fs.readFileSync(path.join(__dirname, 'public', 'terre.bin')));
 const row = db.prepare('SELECT state FROM world WHERE id = 1').get();
-const world = row ? new World(JSON.parse(row.state)) : World.create(SEED);
+const world = row ? new World(JSON.parse(row.state), TERRE) : World.create(SEED, TERRE);
 if (!row) console.log(`Monde créé — graine ${SEED}`);
 const qSave = db.prepare('INSERT INTO world (id, state, saved_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at');
 const qSnap = db.prepare('INSERT INTO snapshots (taken_at, tick, state) VALUES (?, ?, ?)');

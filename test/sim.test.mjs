@@ -1,6 +1,8 @@
 // Vérifie le déterminisme et la stabilité du monde sur 240 unités de travail, climat variable.
-import { World, simulateUnit, hashResult, W, H } from '../public/sim.js';
-const w = World.create(20261007);
+import { World, simulateUnit, hashResult, loadTerrain, W, H } from '../public/sim.js';
+import fs from 'node:fs';
+const TERRE = loadTerrain(fs.readFileSync(new URL('../public/terre.bin', import.meta.url)));
+const w = World.create(20261007, TERRE);
 let land = 0, ice = 0; for (let k = 0; k < W * H; k++) { const t = w.T.type[k]; if (t >= 2 && t <= 4) land++; if (t === 5) ice++; }
 console.log(`terre ${(100 * land / (W * H)).toFixed(1)} % · glace ${(100 * ice / (W * H)).toFixed(1)} % · ${w.s.agents.length} drakkars`);
 const t0 = Date.now();
