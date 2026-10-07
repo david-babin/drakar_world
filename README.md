@@ -12,6 +12,13 @@ le résultat. Le monde n'avance que si quelqu'un le regarde.
 
 Variables : `PORT` (8787), `DB` (./monde.db), `SEED` (graine du terrain, ne change rien une fois la base créée).
 
+### Production (Coolify)
+
+Build Pack « Dockerfile » (Node 22, aucune dépendance). Port exposé : `8787`.
+Variables : `FINNHUB_KEY` (secret), éventuellement `MARKET_SYMBOL`. `DB` vaut `/app/data/monde.db` dans
+l'image : monter un **volume persistant sur `/app/data`**, sinon le monde repart de zéro à chaque déploiement.
+Une seule instance (état partagé en mémoire + SQLite).
+
 Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'onglet, avec un passé pré-calculé.
 
 ## Architecture

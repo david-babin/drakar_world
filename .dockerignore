@@ -1,0 +1,12 @@
+.git
+.vscode
+node_modules
+.env
+monde.db
+monde.db-*
+data
+demo.html
+build-demo.mjs
+test
+tools
+*.log
