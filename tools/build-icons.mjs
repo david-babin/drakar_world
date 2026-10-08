@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// build-icons.mjs — renders the favicon and app icons from public/icons/icon.svg (Playwright, dev only).
+// build-icons.mjs — renders the favicon and app icons from src/front/static/icons/icon.svg (Playwright, dev only).
 //   node tools/build-icons.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-const dir = path.resolve('public/icons');
+const dir = path.resolve('src/front/static/icons');
 const svg = fs.readFileSync(path.join(dir, 'icon.svg'), 'utf8');
 const sizes = [32, 180, 192, 512];
 const b = await chromium.launch();

@@ -3,12 +3,12 @@
 import { createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 
-const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-const MAX_MESSAGE = 4 * 1024 * 1024;
-const DEFLATE_MIN = 192;                      // below this, compression gains nothing
+import { WS_MAX_MESSAGE as MAX_MESSAGE, WS_DEFLATE_MIN as DEFLATE_MIN, WS_PING_MS } from './constants.js';
+
+const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';   // RFC 6455 §1.3
 const TAIL = Buffer.from([0, 0, 0xff, 0xff]);
 
-export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } = {}) {
+export function attachWebSocket(server, path, onConnection, { pingMs = WS_PING_MS } = {}) {
   const clients = new Set();
 
   server.on('upgrade', (req, socket, head) => {

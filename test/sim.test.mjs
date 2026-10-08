@@ -1,8 +1,8 @@
 // Checks the world's determinism and stability over 240 work units with a varying climate,
 // then the wire format: a client applying only deltas must stay identical to the server snapshot.
-import { World, simulateUnit, hashResult, loadTerrain, W, H } from '../public/sim.js';
+import { World, simulateUnit, hashResult, loadTerrain, W, H } from '../src/lib/index.js';
 import fs from 'node:fs';
-const TERRAIN = loadTerrain(fs.readFileSync(new URL('../public/terrain.bin', import.meta.url)));
+const TERRAIN = loadTerrain(fs.readFileSync(new URL('../assets/earth/terrain.bin', import.meta.url)));
 const w = World.create(20261007, TERRAIN);
 let land = 0, ice = 0; for (let k = 0; k < W * H; k++) { const t = w.T.type[k]; if (t >= 2 && t <= 4) land++; if (t === 5) ice++; }
 console.log(`land ${(100 * land / (W * H)).toFixed(1)} % · ice ${(100 * ice / (W * H)).toFixed(1)} % · ${w.s.agents.length} longships`);
@@ -24,7 +24,7 @@ console.log(`${((Date.now() - t0) / N).toFixed(1)} ms/unit · state ${(JSON.stri
 console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  ${c.kind} ${JSON.stringify(c.p)}`).join('\n'));
 
 {
-  const { unpackSnapshot, applyDelta, packUnit, unpackUnit, packResult, unpackResult, packEntry, unpackEntry } = await import('../public/sim.js');
+  const { unpackSnapshot, applyDelta, packUnit, unpackUnit, packResult, unpackResult, packEntry, unpackEntry } = await import('../src/lib/index.js');
   const wireRun = (w2, units, label) => {
   let client = unpackSnapshot(JSON.parse(JSON.stringify(w2.snapshot(1))));
   let wire = { delta: 0, unit: 0, result: 0, n: 0, changed: 0, removed: 0 };

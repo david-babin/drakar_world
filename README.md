@@ -6,63 +6,108 @@ world only moves forward while someone is watching.
 
 ## Running
 
+    npm install               # dev dependencies only: esbuild, and the Earth data builders
     cp .env.example .env      # then FINNHUB_KEY=… (optional)
-    npm start                 # Node ≥ 22, no dependencies (built-in node:sqlite and WebSocket)
-    # → http://localhost:8787
+    npm start                 # build, then serve → http://localhost:8787
+    npm run dev               # build, serve, rebuild on every change in src/ (the server restarts when needed)
 
+Node ≥ 22. The server itself has no runtime dependency (built-in node:sqlite and WebSocket).
 Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once the database exists).
+
+| Script | What it does |
+|---|---|
+| `npm run build` | builds `public/` (the site) and `bin/backend.js` (the server) |
+| `npm run serve` | runs `bin/backend.js` without rebuilding |
+| `npm run demo` | also writes `demo.html`: the page standalone, data inlined, no server |
+| `npm test` | determinism, stability and wire-format consistency of the simulation |
+| `npm run long-run -- 20000 1000` | runs the world offline for hours, prints the curves |
+| `npm run build:earth` | rebuilds the Earth data into `assets/earth/` |
+| `npm run build:icons` | renders the icons from `icon.svg` (requires playwright) |
 
 ### Production (Coolify)
 
-"Dockerfile" build pack (Node 22, no dependencies). Exposed port: `8787`.
+"Dockerfile" build pack, two stages: the first installs the dev dependencies and runs the build, the
+second only receives `bin/` and `public/` (Node 22, no dependencies). Exposed port: `8787`.
 Variables: `FINNHUB_KEY` (secret), optionally `MARKET_SYMBOL`. `DB` is `/app/data/world.db` in the image:
 mount a **persistent volume on `/app/data`**, otherwise the world starts over on every deployment. A legacy
 `monde.db` found next to it is adopted on startup. Single instance (shared in-memory state + SQLite).
 
 Open `demo.html` directly (no server) or `/?demo`: the world lives in the tab, with a precomputed past.
 
+## Source layout and build
+
+```
+src/lib/       shared by the server, the browsers and the tools (deterministic simulation)
+  constants/   grid.js · rules.js · lineages.js · names.js · world.js · climate.js
+  geo.js · random.js · terrain.js · genome.js · simulate.js · wire.js · world.js · market.js · index.js
+src/back/      server only → bin/backend.js
+  constants.js · config.js (environment, paths) · main.js (entry) · db.js · static.js · visitors.js
+  ws-mini.js · fingerprint.js · market/ (index.js, sources.js)
+src/front/     the page → public/
+  index.html (template) · styles.css · constants.js · main.js (entry) · state.js · dom.js
+  i18n.js · identity.js · telemetry.js · camera.js · input.js · render.js · urban.js · hud.js · witness.js
+  chronicle.js · store.js · earth.js · gl/ (globe.js, shaders.js) · compute.js · net.js · demo.js
+  locales/     en.json, fr.json — embedded in the bundle
+  static/      icons, manifest — copied as is
+assets/earth/  Earth data, built once by tools/build-earth.mjs (versioned)
+tools/         build.mjs · build-earth.mjs · build-icons.mjs · long-run.mjs
+public/, bin/  build output (not versioned)
+```
+
+`tools/build.mjs` (esbuild):
+
+1. **Earth data.** If a file of `assets/earth/` is missing, it runs `build-earth.mjs`, whose inputs are fetched
+   once into `.cache/earth/` (the PyPI package `basemap-data`, the npm package `world-atlas`).
+2. **`public/`.** Earth data and `src/front/static/` copied; `src/front/main.js` bundled and minified into
+   `app.js` (one IIFE, ES2020) with the locales embedded; `styles.css` minified and inlined into `index.html`.
+   Every versioned URL (`?v=`) carries the file's fingerprint — the same one the server uses as ETag — so it
+   is cached for a year, immutable.
+3. **`bin/backend.js`.** `src/back/main.js` bundled and minified for Node 22, with a source map.
+
+With `--watch`, every change in `src/` rebuilds; the server restarts when `lib/` or `back/` changed, and
+reloads the page's files on its own otherwise.
+
 ## Languages
 
 The page is available in English and French. The language is picked from `?lang=`, then the visitor's saved
 choice, then the browser preferences, defaulting to English; a discreet `en fr` switch sits next to `.tech`.
-UI strings live in `locales/<lang>.json` and are injected into the page by the server (no extra request).
+UI strings live in `src/front/locales/<lang>.json` and are embedded in the bundle by the build (no extra request).
 Adding a language means adding a file. The chronicle is stored as structured entries (kind + parameters) and
 rendered client-side in the visitor's language; lineage names are translated by id.
 
 ## Architecture
 
-- `public/sim.js` — deterministic simulation shared by server and browser (agents, genome, work units, the
-  `World` class: lease / integrate / chronicle, wire format, deltas). Terrain is loaded, not generated.
-- `tools/build-earth.mjs` — builds the Earth data once (`npm run build:earth -- --etopo … --bmng … --land …`;
-  dev dependencies: jpeg-js, pngjs, d3-contour): ETOPO1 (elevation, through its colour ramp), Blue Marble
-  (moisture, vegetation index) and Natural Earth 1:50m (coasts). Inputs: `etopo1.jpg` and `bmng.jpg` from the
-  PyPI package `basemap-data` (a plain zip), `land-50m.json` from the npm package `world-atlas`. Outputs,
-  versioned in `public/`: `terrain.bin` (384 × 192 grid: type + fertility, 147 kB, 19 brotli), `base.png`
-  (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings, 84 kB), `coasts.bin`
-  (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines in zigzag-varint deltas.
-- `server.js` — static files + read API (`/api/world`, `/api/market`, `/api/stats`), WebSocket `/ws` for
-  everything else, SQLite persistence (current state, hourly snapshots, unit log).
-- `market.js` — the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking the S&P 500, the
-  index itself being paid data) over REST at startup and every 10 min, then **live trades over WebSocket**
-  (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per second.
-  Without a key: Stooq → Yahoo → FRED, then a dated random walk. SQLite cache.
-- `ws-mini.js` — minimal RFC 6455 WebSocket server with permessage-deflate, no dependencies.
-- `tools/build-icons.mjs` — renders `public/icons/icon.svg` to PNG 32 / 180 / 192 / 512 (`npm run build:icons`,
-  requires `playwright`). `favicon.svg` is the background-less variant for the tab; `manifest.webmanifest`
-  allows adding the page to a home screen, full screen.
-- `public/index.html` — everything geographic is drawn by the GPU in one WebGL pass: the disc and terrain
-  classes (`base.png`), the **land** (Natural Earth rings filled by stencil parity into a 4096 × 2048 texture,
-  once at load), the **coasts and contour lines** (quads extruded in the vertex shader, 16-bit indices in
-  chunks). The 2D canvas only carries life: groups, settlements, great-circle routes, regions. Then HUD,
-  chronicle, compute loop. Drag to rotate, wheel / pinch to zoom (confined to the globe: the page never
-  zooms). After 6 s without interaction, the camera glides to the region being computed — yours, otherwise
-  another witness's.
+- **Simulation** (`src/lib/`): agents, genome, work units (`simulate.js`), the `World` class (lease /
+  integrate / chronicle), wire format and deltas (`wire.js`). Terrain is loaded, not generated.
+- **Earth data** (`tools/build-earth.mjs`, dev dependencies jpeg-js, pngjs, d3-contour, world-atlas): ETOPO1
+  (elevation, through its colour ramp), Blue Marble (moisture, vegetation index) and Natural Earth 1:50m
+  (coasts). Outputs, versioned in `assets/earth/`: `terrain.bin` (384 × 192 grid: type + fertility, 147 kB,
+  19 brotli), `base.png` (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings,
+  84 kB), `coasts.bin` (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines
+  in zigzag-varint deltas.
+- **Server** (`src/back/`): static files + read API (`/api/world`, `/api/market`, `/api/stats`), WebSocket `/ws`
+  for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log).
+- **Market** (`src/back/market/`): the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking
+  the S&P 500, the index itself being paid data) over REST at startup and every 10 min, then **live trades over
+  WebSocket** (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per
+  second. Without a key: Stooq → Yahoo → FRED, then a dated random walk (`src/lib/market.js`). SQLite cache.
+- **WebSocket** (`src/back/ws-mini.js`): minimal RFC 6455 server with permessage-deflate, no dependencies.
+- **Icons** (`tools/build-icons.mjs`): renders `src/front/static/icons/icon.svg` to PNG 32 / 180 / 192 / 512.
+  `favicon.svg` is the background-less variant for the tab; `manifest.webmanifest` allows adding the page to a
+  home screen, full screen.
+- **Page** (`src/front/`): everything geographic is drawn by the GPU in one WebGL pass (`gl/`): the disc and
+  terrain classes (`base.png`), the **land** (Natural Earth rings filled by stencil parity into a 4096 × 2048
+  texture, once at load), the **coasts and contour lines** (quads extruded in the vertex shader, 16-bit indices
+  in chunks). The 2D canvas only carries life (`render.js`): groups and settlement areas, settlements,
+  great-circle routes, regions. Then HUD, chronicle, compute loop (`compute.js`, `net.js`). Drag to rotate,
+  wheel / pinch to zoom (confined to the globe: the page never zooms). After 6 s without interaction, the
+  camera glides to the region being computed — yours, otherwise another witness's.
 
 ### Protocol (WebSocket `/ws`)
 
 Everything dynamic goes through a JSON text WebSocket with `permessage-deflate` (negotiated, no context
 takeover, built-in zlib; `ws-mini.js`). Objects travel as **positional arrays** (`packAgent`,
-`packSettlement`, `packRoute`, `packEntry` in `sim.js`) and the full state only travels on `hello`: after that,
+`packSettlement`, `packRoute`, `packEntry` in `src/lib/wire.js`) and the full state only travels on `hello`: after that,
 **deltas**.
 
 Client → server: `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (every 500 ms during
@@ -87,8 +132,9 @@ visitor, and ~2.6 kB per unit of the others received by each one — versus 60 k
 ### Static files
 
 Read once at startup, precompressed with **brotli** (q11) and gzip, served with `ETag` (304 when unchanged)
-and `Vary: Accept-Encoding`. Earth data is served under **versioned URLs** (`?v=<fingerprint>`) with a
-one-year immutable cache: a changed file changes URL, so a stale cache can never be read by newer code. First
+and `Vary: Accept-Encoding`. Earth data and `app.js` are served under **versioned URLs** (`?v=<fingerprint>`,
+written by the build) with a one-year immutable cache: a changed file changes URL, so a stale cache can never
+be read by newer code. First
 visit ≈ 290 kB; later visits ≈ 22 kB, then 304s. In dev, the folder is hot-reloaded.
 
 ### What the visitor sees
@@ -140,7 +186,7 @@ sea is a "sea lane" (dashed). Each route adds +12 % yield to the settlement (max
 
 ### Long evolution (v1)
 
-All constants live in `RULES` (`public/sim.js`); the server embeds the world-level context in each unit, so
+All constants live in `RULES` (`src/lib/constants/rules.js`); the server embeds the world-level context in each unit, so
 the simulation stays deterministic and verifiable.
 
 - **Capacity grows with the land and with time.** A region holds `Σ fertility × 0.06 × tech` groups, where

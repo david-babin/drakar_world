@@ -1,6 +1,6 @@
 {
   "name": "drakar-tech",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "drakar.tech — one world, computed by those who watch it",
@@ -8,15 +8,21 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node --no-warnings --env-file-if-exists=.env server.js",
+    "build": "node tools/build.mjs",
+    "start": "node tools/build.mjs && node --no-warnings --env-file-if-exists=.env bin/backend.js",
+    "serve": "node --no-warnings --env-file-if-exists=.env bin/backend.js",
+    "dev": "node tools/build.mjs --watch",
+    "demo": "node tools/build.mjs --demo",
     "test": "node test/sim.test.mjs",
-    "demo": "node build-demo.mjs",
+    "long-run": "node tools/long-run.mjs",
     "build:earth": "node tools/build-earth.mjs",
     "build:icons": "node tools/build-icons.mjs"
   },
   "devDependencies": {
     "d3-contour": "^4.0.2",
+    "esbuild": "0.28.2",
     "jpeg-js": "^0.4.4",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "world-atlas": "2.0.2"
   }
 }

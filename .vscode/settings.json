@@ -2,5 +2,5 @@
   "files.eol": "\n",
   "editor.tabSize": 2,
   "files.exclude": { "world.db*": true, "world-dev.db*": true },
-  "search.exclude": { "demo.html": true }
+  "search.exclude": { "demo.html": true, "public": true, "bin": true, ".cache": true }
 }

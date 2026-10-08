@@ -2,32 +2,23 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "drakar: server",
+      "label": "drakar: dev (watch + server)",
       "type": "shell",
-      "command": "node --no-warnings --env-file-if-exists=.env server.js",
+      "command": "npm run dev",
       "isBackground": true,
       "problemMatcher": [],
       "group": { "kind": "build", "isDefault": true },
       "presentation": { "reveal": "always", "panel": "dedicated" }
     },
-    {
-      "label": "drakar: simulation test",
-      "type": "shell",
-      "command": "node test/sim.test.mjs",
-      "group": { "kind": "test", "isDefault": true },
-      "problemMatcher": []
-    },
+    { "label": "drakar: build", "type": "shell", "command": "npm run build", "problemMatcher": [] },
     {
       "label": "drakar: delete world-dev.db",
       "type": "shell",
       "command": "node -e \"for (const f of ['world-dev.db','world-dev.db-wal','world-dev.db-shm']) try { require('fs').unlinkSync(f) } catch {}\"",
       "problemMatcher": []
     },
-    {
-      "label": "drakar: build demo.html",
-      "type": "shell",
-      "command": "node build-demo.mjs",
-      "problemMatcher": []
-    }
+    { "label": "drakar: build + delete world-dev.db", "dependsOn": ["drakar: build", "drakar: delete world-dev.db"], "dependsOrder": "sequence", "problemMatcher": [] },
+    { "label": "drakar: simulation test", "type": "shell", "command": "npm test", "group": { "kind": "test", "isDefault": true }, "problemMatcher": [] },
+    { "label": "drakar: build demo.html", "type": "shell", "command": "npm run demo", "problemMatcher": [] }
   ]
 }

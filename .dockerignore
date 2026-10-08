@@ -1,13 +1,13 @@
 .git
 .vscode
+.cache
 node_modules
+public
+bin
 .env
 world.db
 world.db-*
 world-dev.db*
 data
 demo.html
-build-demo.mjs
-test
-tools
 *.log

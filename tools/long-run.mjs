@@ -2,7 +2,7 @@
 //   node tools/long-run.mjs [units=20000] [every=1000] [seed]
 // ~950 units ≈ one hour of a single visitor watching. Prints one CSV-ish line per `every` units.
 import fs from 'node:fs';
-import { World, simulateUnit, loadTerrain, regionOf, RULES, techOf, W } from '../public/sim.js';
+import { World, simulateUnit, loadTerrain, regionOf, RULES, techOf, W } from '../src/lib/index.js';
 
 // settlement areas as the page draws them: groups of one lineage linked within 3 cells
 function areas(agents) {
@@ -19,7 +19,7 @@ function areas(agents) {
   return out.sort((a, b) => b - a);
 }
 
-const T = loadTerrain(fs.readFileSync(new URL('../public/terrain.bin', import.meta.url)));
+const T = loadTerrain(fs.readFileSync(new URL('../assets/earth/terrain.bin', import.meta.url)));
 const N = +(process.argv[2] || 20000), every = +(process.argv[3] || 1000), seed = +(process.argv[4] || 20261007);
 const w = World.create(seed, T);
 const caps = [...w.regionFert].map(f => Math.round(f * RULES.capPerFert));

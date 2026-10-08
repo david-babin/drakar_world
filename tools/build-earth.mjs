@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 // build-earth.mjs — builds drakar.tech's Earth data, once, outside the runtime.
 //
-// Inputs (not versioned):
+// Inputs (not versioned; fetched into .cache/earth/ when not given):
 //   --etopo  etopo1.jpg      ETOPO1 (NOAA) tinted by elevation, 5400×2700   — PyPI package `basemap-data` (or any ETOPO image)
 //   --bmng   bmng.jpg        Blue Marble (NASA), same package                — moisture (vegetation index)
 //   --land   land-50m.json   Natural Earth 1:50m, TopoJSON                   — npm package `world-atlas`
 //
-// Outputs (versioned, in public/):
+// Outputs (versioned, in assets/earth/; the build copies them to public/):
 //   terrain.bin   384×192 simulation grid: type (0 sea, 1 shelf, 2 plain, 3 hills, 4 mountain, 5 ice) + fertility
 //   base.png      768×384 greyscale: type*32 + elevation level*2                (relief classes and shading)
 //   land.bin      Natural Earth rings, unwrapped (lon up to 540°), zigzag-varint deltas, 1/60°   (fill, stencil parity)
 //   coasts.bin    Natural Earth arcs, zigzag-varint deltas, 1/100°                              (vector coasts)
 //   contours.bin  contour lines 500/1000/2000/3000/4000 m, zigzag-varint deltas, 1/100°         (vector relief)
 //
-//   npm run build:earth -- --etopo … --bmng … --land …          (dev dependencies: jpeg-js, pngjs, d3-contour)
+//   npm run build:earth [-- --etopo … --bmng … --land … --out …]    (dev dependencies: jpeg-js, pngjs, d3-contour, world-atlas)
+//   npm run build runs it by itself when assets/earth/ is incomplete.
 
 import fs from 'node:fs';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import { contours as d3contours } from 'd3-contour';
+import { earthSources } from './lib/earth-sources.mjs';
 
 const FW = 1536, FH = 768;          // base + contours
 const SW = 384, SH = 192;           // simulation grid (FW/SW = 4)
@@ -30,8 +32,10 @@ const RAMP = [[0, [51, 102, 0]], [100, [51, 204, 102]], [200, [187, 228, 146]], 
   [6500, [183, 147, 147]], [7000, [194, 176, 176]], [7500, [204, 204, 204]], [8000, [229, 229, 229]]];
 
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean).map(s => { const [k, ...v] = s.trim().split(/\s+/); return [k, v.join(' ')]; }));
-const OUT = args.out || 'public';
-for (const k of ['etopo', 'bmng', 'land']) if (!args[k]) { console.error('usage: build-earth.mjs --etopo etopo1.jpg --bmng bmng.jpg --land land-50m.json [--out public]'); process.exit(1); }
+const OUT = args.out || 'assets/earth';
+// inputs not given: fetched once into .cache/earth/ (basemap-data from PyPI, world-atlas from node_modules)
+if (!args.etopo || !args.bmng || !args.land) Object.assign(args, { ...(await earthSources('.cache/earth')), ...Object.fromEntries(Object.entries(args).filter(([, v]) => v)) });
+fs.mkdirSync(OUT, { recursive: true });
 const log = (...a) => console.error(...a);
 
 // ---------- images ----------

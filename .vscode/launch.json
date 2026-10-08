@@ -5,28 +5,25 @@
       "name": "drakar.tech · server",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/server.js",
+      "program": "${workspaceFolder}/bin/backend.js",
       "cwd": "${workspaceFolder}",
       "env": { "PORT": "8787" },
-      "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env"],
+      "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env", "--enable-source-maps"],
+      "preLaunchTask": "drakar: build",
       "console": "integratedTerminal",
       "skipFiles": ["<node_internals>/**"],
-      "serverReadyAction": {
-        "pattern": "http://localhost:([0-9]+)",
-        "uriFormat": "http://localhost:%s",
-        "action": "openExternally"
-      }
+      "serverReadyAction": { "pattern": "http://localhost:([0-9]+)", "uriFormat": "http://localhost:%s", "action": "openExternally" }
     },
     {
       "name": "drakar.tech · server (fresh world)",
       "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/server.js",
+      "program": "${workspaceFolder}/bin/backend.js",
       "cwd": "${workspaceFolder}",
       "env": { "PORT": "8787", "DB": "${workspaceFolder}/world-dev.db" },
       "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env"],
+      "preLaunchTask": "drakar: build + delete world-dev.db",
       "console": "integratedTerminal",
-      "preLaunchTask": "drakar: delete world-dev.db",
       "skipFiles": ["<node_internals>/**"]
     },
     {

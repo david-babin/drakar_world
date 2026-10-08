@@ -7,3 +7,8 @@ node_modules/
 *.log
 .DS_Store
 .env
+# build output (npm run build)
+public/
+bin/
+demo.html
+.cache/
