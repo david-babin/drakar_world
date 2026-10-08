@@ -364,13 +364,19 @@ async function loadAssetsOnce(reload) {
 // ---------- camera ----------
 const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
 const regionCenter = reg => ({ lon: (((reg % RX) + .5) * RW / W * 360 - 180) * DEG, lat: (90 - (Math.floor(reg / RX) + .5) * RH / H * 180) * DEG });
-let dpr = 1, cw = 0, ch = 0, R = 0, cx = 0, cy = 0;
+// Render at the screen's native density (up to 3×, phones are often 2.6–3×). Backing sizes are rounded and the
+// effective ratio recomputed from them: a fractional canvas size would be resampled by the browser and blur.
+// `quality` only goes down, and only if the device cannot keep up (see the frame-time watch in frame()).
+let dpr = 1, cw = 0, ch = 0, R = 0, cx = 0, cy = 0, quality = 1;
 function resize() {
-  dpr = Math.min(2, devicePixelRatio || 1);
   cw = innerWidth; ch = innerHeight;
-  gcv.width = ocv.width = cw * dpr; gcv.height = ocv.height = ch * dpr;
+  const want = Math.min(3, devicePixelRatio || 1) * quality;
+  const bw = Math.max(1, Math.round(cw * want)), bh = Math.max(1, Math.round(ch * want));
+  if (gcv.width !== bw || gcv.height !== bh) { gcv.width = ocv.width = bw; gcv.height = ocv.height = bh; }
+  dpr = bw / cw;
 }
 addEventListener('resize', resize); resize();
+matchMedia?.(`(resolution: ${devicePixelRatio}dppx)`).addEventListener?.('change', resize);   // moved to another screen
 function layout() {
   R = Math.min(cw, ch) * 0.42 * cam.zoom;
   cx = cw > 900 ? cw * 0.46 : cw / 2; cy = ch / 2;
@@ -448,11 +454,19 @@ gcv.addEventListener('mouseleave', () => tip.style.display = 'none');
 
 // ---------- rendering ----------
 const hue = lin => world?.lineages[lin]?.hue ?? 0;
-let last = performance.now(), frames = 0, fpsAt = last, hits = [];
+let last = performance.now(), frames = 0, fpsAt = last, hits = [], lowStreak = 0, worldAt = Infinity;
 function frame(now) {
   requestAnimationFrame(frame);
   if (!world) return;
-  frames++; if (now - fpsAt > 1000) { tele.fps = frames; frames = 0; fpsAt = now; }
+  frames++;
+  if (now - fpsAt > 2000) {
+    tele.fps = Math.round(frames * 1000 / (now - fpsAt));
+    // sustained low frame rate (two slow windows in a row, not during start-up, page visible):
+    // lower the resolution a notch, never below 1×
+    lowStreak = document.visibilityState === 'visible' && now - worldAt > 6000 && tele.fps < 40 ? lowStreak + 1 : 0;
+    if (lowStreak >= 2 && Math.min(3, devicePixelRatio || 1) * quality * 0.8 >= 1) { quality *= 0.8; lowStreak = 0; resize(); }
+    frames = 0; fpsAt = now;
+  }
   // inertia and slow rotation at rest
   if (!drag && !pinch) {
     cam.lon += cam.vlon; cam.lat = clampLat(cam.lat + cam.vlat);
@@ -665,7 +679,7 @@ function renderChronicle() { chron.innerHTML = ''; for (const e of world.chronic
 function setWorld(w) {
   const first = !world;
   world = w;
-  if (first) { renderChronicle(); $('veil').style.opacity = 0; }
+  if (first) { worldAt = performance.now(); renderChronicle(); $('veil').style.opacity = 0; }
 }
 applyLang();
 
