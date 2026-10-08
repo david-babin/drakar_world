@@ -21,7 +21,7 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 | `npm run demo` | also writes `demo.html`: the page standalone, data inlined, no server |
 | `npm test` | determinism, stability and wire-format consistency of the simulation |
 | `npm run long-run -- 20000 1000` | runs the world offline for hours, prints the curves |
-| `npm run long-run -- 95000 5000 --db world-dev.db` | same, then writes the aged world to a new database: `DB=world-dev.db npm start` |
+| `node tools/long-run.mjs 95000 5000 --db aged.db` | same, and writes the aged world to a new database (checkpointed): `DB=aged.db npm start` |
 | `npm run build:earth` | rebuilds the Earth data into `assets/earth/` |
 | `npm run build:icons` | renders the icons from `icon.svg` (requires playwright) |
 
@@ -207,9 +207,11 @@ the simulation stays deterministic and verifiable.
 
 `node tools/long-run.mjs [units] [every] [seed]` runs the world offline (~950 units ≈ one hour of a single
 witness) and prints population, lineages alive, the largest lineage's share, regions held, settlements,
-routes, settlement areas above 10,000 and state size. With `--db <file>`, the aged world is written at the end (or on Ctrl+C) to a
-new SQLite file, dated so that it ends now, ready for `DB=<file> npm start`; an existing file is never
-overwritten. Over 25 simulated hours: ~300,000 souls, 10–12 lineages
+routes, settlement areas above 10,000 and state size. With `--db <file>`, the aged world is written to a new SQLite file, dated so
+that it ends now, ready for `DB=<file> npm start` (or `DB=<file>` in `.env`); an existing file is never
+overwritten. It is checkpointed every `--save-every` units (5,000 by default) and at the end; Ctrl+C stops
+after the current unit and saves. On Windows, run it with `node tools/long-run.mjs …` rather than through npm,
+which terminates its child at once on Ctrl+C (the last checkpoint is kept either way). Over 25 simulated hours: ~300,000 souls, 10–12 lineages
 alive, the largest holding ~20 % of the world, 14–15 regions held.
 
 ### Ideas
