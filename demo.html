@@ -1166,34 +1166,22 @@ function frame(now) {
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
-  // settled world: nearby groups of one lineage merge on screen into one point, sized by tiers of
-  // 10,000 souls — camps, then villages, towns, cities. The merge radius is in pixels, so zooming in splits them.
-  const CL = 11, grid = new Map(), clusters = [];
-  const still = world.agents.filter(a => !animated.has(a.id) && a.pop > 0).sort((a, b) => b.pop - a.pop);
-  for (const a of still) {
-    const p = project(a.x, a.y, o); if (!p) continue;
-    const gx = Math.floor(p.x / CL), gy = Math.floor(p.y / CL);
-    let best = null, bd = CL * CL;
-    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) for (const c of grid.get((gx + i) + ',' + (gy + j)) || []) {
-      if (c.lin !== a.lin) continue; const d = (c.x - p.x) ** 2 + (c.y - p.y) ** 2; if (d < bd) { bd = d; best = c; }
-    }
-    if (best) { const w = best.pop + a.pop; best.x = (best.x * best.pop + p.x * a.pop) / w; best.y = (best.y * best.pop + p.y * a.pop) / w; best.pop = w; best.c = Math.max(best.c, p.c); best.n++; }
-    else { const c = { x: p.x, y: p.y, c: p.c, lin: a.lin, pop: a.pop, n: 1, a }; clusters.push(c); const k = gx + ',' + gy; (grid.get(k) || grid.set(k, []).get(k)).push(c); }
-  }
-  for (const c of clusters) {
-    const tier = Math.floor(c.pop / 10000), k = 0.6 + 0.4 * c.c, al = 0.3 + 0.7 * c.c;
-    const col = `hsla(${hue(c.lin)},60%,66%,`;
-    if (!tier) {                                   // camp / hamlet: a plain dot
-      octx.fillStyle = col + (.8 * al) + ')';
-      octx.beginPath(); octx.arc(c.x, c.y, Math.min(4, 1 + Math.sqrt(c.pop) * .2) * k, 0, 6.283); octx.fill();
-    } else {                                       // village → town → city: a bigger core, one more ring per tier step
-      const r = (3.2 + 1.6 * Math.sqrt(tier)) * k;
-      octx.fillStyle = col + (.85 * al) + ')';
-      octx.beginPath(); octx.arc(c.x, c.y, r, 0, 6.283); octx.fill();
-      octx.strokeStyle = col + (.35 * al) + ')'; octx.lineWidth = .8;
-      for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(c.x, c.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
-    }
-    hits.push({ x: c.x, y: c.y, ag: c.a });
+  // settled world. Groups of one lineage within 3 cells of each other form a settlement area (single
+  // linkage, in world space). Below 10,000 souls it shows as its groups; each 10,000 makes it a bigger
+  // point — village, town, city — with its groups drawn faintly around the core.
+  const still = world.agents.filter(a => !animated.has(a.id) && a.pop > 0);
+  for (const c of urbanAreas(still)) {
+    const tier = Math.floor(c.pop / 10000);
+    if (!tier) { for (const a of c.members) drawAgent(a, .8); continue; }
+    for (const a of c.members) drawAgent(a, .28);
+    const p = projectLL(S.lonOf(c.x) * DEG, S.latOf(c.y) * DEG, o); if (!p) continue;
+    const k = 0.6 + 0.4 * p.c, al = 0.3 + 0.7 * p.c, col = `hsla(${hue(c.lin)},60%,68%,`;
+    const r = (3.4 + 1.8 * Math.sqrt(tier)) * k;
+    octx.fillStyle = col + (.9 * al) + ')';
+    octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
+    octx.strokeStyle = col + (.35 * al) + ')'; octx.lineWidth = .8;
+    for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(p.x, p.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
+    hits.push({ x: p.x, y: p.y, ag: c.core });
   }
   for (const pr of peers.values()) for (const [id, x, y, lin, pop] of pr.agents) if (pop > 0) drawAgent({ id, x, y, lin, pop, food: 0, g: [] }, .9);
   if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
@@ -1288,6 +1276,37 @@ function parseLegacy(e) {
   legacyCache.set(e.text, out);
   return out;
 }
+// settlement areas: connected groups of one lineage (≤ 3 cells apart), with their pop-weighted centre.
+// Recomputed only when the settled set changes (the world, not the animation, drives it).
+let urbanKey = null, urbanCache = [];
+function urbanAreas(agents) {
+  const key = agents.length + ':' + (agents.length ? agents[0].id + ':' + agents[agents.length - 1].id : '') + ':' + world.tick;
+  if (key === urbanKey) return urbanCache;
+  const LINK = 3, cell = new Map(), seen = new Set(), out = [];
+  for (const a of agents) { const k = ((a.x / LINK) | 0) + ',' + ((a.y / LINK) | 0); (cell.get(k) || cell.set(k, []).get(k)).push(a); }
+  const GX = Math.ceil(S.W / LINK);
+  for (const a0 of agents) {
+    if (seen.has(a0)) continue;
+    const members = [], stack = [a0]; seen.add(a0);
+    while (stack.length) {
+      const a = stack.pop(); members.push(a);
+      const gx = (a.x / LINK) | 0, gy = (a.y / LINK) | 0;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        for (const b of cell.get(((gx + i + GX) % GX) + ',' + (gy + j)) || []) {
+          if (seen.has(b) || b.lin !== a0.lin) continue;
+          let dx = Math.abs(b.x - a.x); dx = Math.min(dx, S.W - dx);
+          if (dx <= LINK && Math.abs(b.y - a.y) <= LINK) { seen.add(b); stack.push(b); }
+        }
+      }
+    }
+    let pop = 0, core = members[0], sx = 0, sy = 0;
+    for (const m of members) { pop += m.pop; if (m.pop > core.pop) core = m; }
+    for (const m of members) { let dx = m.x - core.x; if (dx > S.W / 2) dx -= S.W; else if (dx < -S.W / 2) dx += S.W; sx += dx * m.pop; sy += (m.y - core.y) * m.pop; }
+    out.push({ lin: a0.lin, pop, members, core, x: core.x + sx / pop, y: core.y + sy / pop });
+  }
+  urbanKey = key; urbanCache = out;
+  return out;
+}
 function entryText(e) {
   let p = e.p || {}; const C = 'chronicle.';
   const legacy = e.text && !Object.keys(p).length;
@@ -1333,23 +1352,30 @@ applyLang();
 
 // ---------- compute loop ----------
 const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1.5));
+// The unit being computed. It can be aborted at any time (connection lost, lease expired while hidden):
+// the promise then resolves at once, even if the tab is hidden and no animation frame will come.
+let run = null;
+function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } lease = null; }
 async function runUnit(unit, verify, onDone, onProgress) {
   const gen = S.simulateUnitGen(T, unit);
-  lease = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  const L = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  lease = L;
   let lastDec = 0, lastT = performance.now(), lastProg = 0;
   await new Promise(resolve => {
+    const me = run = { resolve, aborted: false, startedAt: Date.now() };
     const tickFrame = () => {
+      if (me.aborted) return;
       const start = performance.now();
       let r;
       do {
         r = gen.next();
         if (r.done) break;
-        lease.agents = r.value.agents; lease.step = r.value.step + 1;
-      } while (performance.now() - start < budgetMs() && lease.step % 2 !== 0);
+        L.agents = r.value.agents; L.step = r.value.step + 1;
+      } while (performance.now() - start < budgetMs() && L.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
-      if (onProgress && !r.done && now - lastProg > 500) { lastProg = now; onProgress(lease.step, lease.agents); }
-      if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
+      if (onProgress && !r.done && now - lastProg > 500) { lastProg = now; onProgress(L.step, L.agents); }
+      if (r.done) { if (run === me) run = null; onDone(r.value, performance.now() - L.t0); resolve(); } else requestAnimationFrame(tickFrame);
     };
     requestAnimationFrame(tickFrame);
   });
@@ -1371,18 +1397,26 @@ function progressSender(region) {
 }
 async function loopServer() {
   const A = await loadAssets(); T = S.loadTerrain(A.terrain);
-  // Recovery: the server sends a heartbeat every 20 s. With no message for 45 s the connection is considered
-  // dead (sleep, Wi-Fi loss…) and force-closed, which triggers a reconnect. Waking up, coming back online and
-  // returning to the foreground force an immediate check.
-  let sock = null, backoff = 1000, waiting = null, lastMsgAt = 0, reconnectTimer = null, firstHello = null;
+  // Recovery. The server sends a heartbeat every 20 s; with no message for 45 s the connection is dead.
+  // A socket that is dropped is abandoned at once (its late events are ignored): waiting for its closing
+  // handshake can take minutes on a mobile network that vanished during sleep. Coming back to the foreground
+  // after more than 20 s away always starts a fresh connection — mobile systems kill background sockets
+  // without telling the page — and abandons a unit whose lease has expired meanwhile.
+  let sock = null, gen = 0, backoff = 1000, waiting = null, lastMsgAt = 0, reconnectTimer = null, firstHello = null, hiddenAt = 0;
   const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
+  const schedule = delay => { if (reconnectTimer) clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, delay); };
+  const lost = () => {
+    link = 'reconnecting'; abortUnit(); peers.clear();
+    if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'disconnected' }); }
+  };
   const connect = () => {
-    reconnectTimer = null;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (sock && sock.readyState < 2) return;
-    sock = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
-    lastMsgAt = Date.now(); link = 'connecting';
-    sock.onopen = () => { backoff = 1000; send({ t: 'hello', sigil: ME }); };
-    sock.onmessage = ev => {
+    const my = ++gen, s = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
+    sock = s; lastMsgAt = Date.now(); link = 'connecting';
+    s.onopen = () => { if (my !== gen) return; backoff = 1000; send({ t: 'hello', sigil: ME }); };
+    s.onmessage = ev => {
+      if (my !== gen) return;
       lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
       switch (m.t) {
@@ -1406,25 +1440,36 @@ async function loopServer() {
         case 'unit': case 'ack': case 'nack': if (waiting) { const w = waiting; waiting = null; w(m); } break;
       }
     };
-    sock.onclose = () => {
-      link = 'reconnecting'; lease = null; peers.clear();
-      if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'disconnected' }); }
-      if (!reconnectTimer) reconnectTimer = setTimeout(connect, backoff);
-      backoff = Math.min(15000, backoff * 2);
+    s.onclose = () => {
+      if (my !== gen) return;
+      sock = null; lost(); schedule(backoff); backoff = Math.min(15000, backoff * 2);
     };
-    sock.onerror = () => {};
+    s.onerror = () => {};
   };
-  const dropSocket = () => { try { sock?.close(); } catch {} };
-  // immediate check on wake-up: reconnect without waiting for the backoff
+  // abandon the current socket now and reconnect (immediately, or after the backoff)
+  const dropSocket = (now = false) => {
+    const s = sock; gen++; sock = null;
+    try { s?.close(); } catch {}
+    lost();
+    if (now) connect(); else { schedule(backoff); backoff = Math.min(15000, backoff * 2); }
+  };
   const kick = () => {
     backoff = 1000;
-    if (!sock || sock.readyState >= 2) { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } connect(); return; }
-    if (sock.readyState === 1 && Date.now() - lastMsgAt > 30000) dropSocket();     // apparently open, silent for too long
+    if (!sock) { connect(); return; }
+    if (sock.readyState === 1 && Date.now() - lastMsgAt > 30000) dropSocket(true);    // apparently open, silent for too long
+    else if (sock.readyState === 0 && Date.now() - lastMsgAt > 10000) dropSocket(true); // stuck connecting
+  };
+  const resume = () => {
+    const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
+    if (run && Date.now() - run.startedAt > 80000) abortUnit();                         // its lease has expired
+    if (away > 20000) { backoff = 1000; dropSocket(true); } else kick();
   };
   setInterval(() => { if (sock?.readyState === 1 && Date.now() - lastMsgAt > 45000) dropSocket(); }, 5000);
-  addEventListener('online', kick); addEventListener('pageshow', kick); addEventListener('focus', kick);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
-  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'timeout' }); dropSocket(); } }, 20000); });
+  addEventListener('online', kick); addEventListener('focus', kick);
+  addEventListener('pageshow', e => { if (e.persisted) { hiddenAt = hiddenAt || 1; resume(); } else kick(); });   // restored from the back-forward cache
+  addEventListener('pagehide', () => { hiddenAt = Date.now(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hiddenAt = Date.now(); else resume(); });
+  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'timeout' }); dropSocket(true); } }, 20000); });
   await new Promise(r => { firstHello = r; connect(); });
   for (;;) {
     try {
@@ -1435,7 +1480,7 @@ async function loopServer() {
       const started = Date.now();
       const prog = progressSender(unit.region);
       await runUnit(unit, verify, async (result, ms) => {
-        if (Date.now() - started > 80000) return;        // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
+        if (Date.now() - started > 80000 || sock?.readyState !== 1) return;        // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
         const r = await ask({ t: 'result', result: S.packResult(result), verify, hash: S.hashResult(result), ms: Math.round(ms) });
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send(prog(step, agents)));

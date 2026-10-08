@@ -102,8 +102,12 @@ their name.
 ### Recovery after sleep / network loss
 
 The server sends a heartbeat every 20 s. Client side, 45 s without a message = dead connection: forced close,
-reconnect with backoff (1 → 15 s). Waking up, coming back online, returning to the foreground (`pageshow`,
-`online`, `focus`, `visibilitychange`) trigger an immediate check and reset the backoff to 1 s. A lease
+reconnect with backoff (1 → 15 s). A dropped socket is abandoned at once (its late events are ignored) rather
+than waiting for a closing handshake that a vanished mobile network never completes. Coming back to the
+foreground after more than 20 s away (`visibilitychange`, `pageshow` from the back-forward cache) always opens a
+fresh connection, since mobile systems kill background sockets silently; `online` and `focus` trigger a check.
+The unit being computed is abortable: a lost connection or an expired lease ends it at once and the loop
+leases again. A lease
 request unanswered for 20 s also closes the connection. A unit whose computation was interrupted for more than
 80 s (hidden tab, sleep) is not sent: its lease expired and the region was reassigned. Server side, a Finnhub
 feed silent for 3 min is closed and reopened.

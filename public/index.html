@@ -738,23 +738,30 @@ applyLang();
 
 // ---------- compute loop ----------
 const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1.5));
+// The unit being computed. It can be aborted at any time (connection lost, lease expired while hidden):
+// the promise then resolves at once, even if the tab is hidden and no animation frame will come.
+let run = null;
+function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } lease = null; }
 async function runUnit(unit, verify, onDone, onProgress) {
   const gen = S.simulateUnitGen(T, unit);
-  lease = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  const L = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  lease = L;
   let lastDec = 0, lastT = performance.now(), lastProg = 0;
   await new Promise(resolve => {
+    const me = run = { resolve, aborted: false, startedAt: Date.now() };
     const tickFrame = () => {
+      if (me.aborted) return;
       const start = performance.now();
       let r;
       do {
         r = gen.next();
         if (r.done) break;
-        lease.agents = r.value.agents; lease.step = r.value.step + 1;
-      } while (performance.now() - start < budgetMs() && lease.step % 2 !== 0);
+        L.agents = r.value.agents; L.step = r.value.step + 1;
+      } while (performance.now() - start < budgetMs() && L.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }
-      if (onProgress && !r.done && now - lastProg > 500) { lastProg = now; onProgress(lease.step, lease.agents); }
-      if (r.done) { onDone(r.value, performance.now() - lease.t0); resolve(); } else requestAnimationFrame(tickFrame);
+      if (onProgress && !r.done && now - lastProg > 500) { lastProg = now; onProgress(L.step, L.agents); }
+      if (r.done) { if (run === me) run = null; onDone(r.value, performance.now() - L.t0); resolve(); } else requestAnimationFrame(tickFrame);
     };
     requestAnimationFrame(tickFrame);
   });
@@ -776,18 +783,26 @@ function progressSender(region) {
 }
 async function loopServer() {
   const A = await loadAssets(); T = S.loadTerrain(A.terrain);
-  // Recovery: the server sends a heartbeat every 20 s. With no message for 45 s the connection is considered
-  // dead (sleep, Wi-Fi loss…) and force-closed, which triggers a reconnect. Waking up, coming back online and
-  // returning to the foreground force an immediate check.
-  let sock = null, backoff = 1000, waiting = null, lastMsgAt = 0, reconnectTimer = null, firstHello = null;
+  // Recovery. The server sends a heartbeat every 20 s; with no message for 45 s the connection is dead.
+  // A socket that is dropped is abandoned at once (its late events are ignored): waiting for its closing
+  // handshake can take minutes on a mobile network that vanished during sleep. Coming back to the foreground
+  // after more than 20 s away always starts a fresh connection — mobile systems kill background sockets
+  // without telling the page — and abandons a unit whose lease has expired meanwhile.
+  let sock = null, gen = 0, backoff = 1000, waiting = null, lastMsgAt = 0, reconnectTimer = null, firstHello = null, hiddenAt = 0;
   const send = o => { if (sock?.readyState === 1) sock.send(JSON.stringify(o)); };
+  const schedule = delay => { if (reconnectTimer) clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, delay); };
+  const lost = () => {
+    link = 'reconnecting'; abortUnit(); peers.clear();
+    if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'disconnected' }); }
+  };
   const connect = () => {
-    reconnectTimer = null;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     if (sock && sock.readyState < 2) return;
-    sock = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
-    lastMsgAt = Date.now(); link = 'connecting';
-    sock.onopen = () => { backoff = 1000; send({ t: 'hello', sigil: ME }); };
-    sock.onmessage = ev => {
+    const my = ++gen, s = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws');
+    sock = s; lastMsgAt = Date.now(); link = 'connecting';
+    s.onopen = () => { if (my !== gen) return; backoff = 1000; send({ t: 'hello', sigil: ME }); };
+    s.onmessage = ev => {
+      if (my !== gen) return;
       lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
       switch (m.t) {
@@ -811,25 +826,36 @@ async function loopServer() {
         case 'unit': case 'ack': case 'nack': if (waiting) { const w = waiting; waiting = null; w(m); } break;
       }
     };
-    sock.onclose = () => {
-      link = 'reconnecting'; lease = null; peers.clear();
-      if (waiting) { const w = waiting; waiting = null; w({ t: 'nack', reason: 'disconnected' }); }
-      if (!reconnectTimer) reconnectTimer = setTimeout(connect, backoff);
-      backoff = Math.min(15000, backoff * 2);
+    s.onclose = () => {
+      if (my !== gen) return;
+      sock = null; lost(); schedule(backoff); backoff = Math.min(15000, backoff * 2);
     };
-    sock.onerror = () => {};
+    s.onerror = () => {};
   };
-  const dropSocket = () => { try { sock?.close(); } catch {} };
-  // immediate check on wake-up: reconnect without waiting for the backoff
+  // abandon the current socket now and reconnect (immediately, or after the backoff)
+  const dropSocket = (now = false) => {
+    const s = sock; gen++; sock = null;
+    try { s?.close(); } catch {}
+    lost();
+    if (now) connect(); else { schedule(backoff); backoff = Math.min(15000, backoff * 2); }
+  };
   const kick = () => {
     backoff = 1000;
-    if (!sock || sock.readyState >= 2) { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } connect(); return; }
-    if (sock.readyState === 1 && Date.now() - lastMsgAt > 30000) dropSocket();     // apparently open, silent for too long
+    if (!sock) { connect(); return; }
+    if (sock.readyState === 1 && Date.now() - lastMsgAt > 30000) dropSocket(true);    // apparently open, silent for too long
+    else if (sock.readyState === 0 && Date.now() - lastMsgAt > 10000) dropSocket(true); // stuck connecting
+  };
+  const resume = () => {
+    const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
+    if (run && Date.now() - run.startedAt > 80000) abortUnit();                         // its lease has expired
+    if (away > 20000) { backoff = 1000; dropSocket(true); } else kick();
   };
   setInterval(() => { if (sock?.readyState === 1 && Date.now() - lastMsgAt > 45000) dropSocket(); }, 5000);
-  addEventListener('online', kick); addEventListener('pageshow', kick); addEventListener('focus', kick);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
-  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'timeout' }); dropSocket(); } }, 20000); });
+  addEventListener('online', kick); addEventListener('focus', kick);
+  addEventListener('pageshow', e => { if (e.persisted) { hiddenAt = hiddenAt || 1; resume(); } else kick(); });   // restored from the back-forward cache
+  addEventListener('pagehide', () => { hiddenAt = Date.now(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hiddenAt = Date.now(); else resume(); });
+  const ask = o => new Promise(res => { waiting = res; send(o); setTimeout(() => { if (waiting === res) { waiting = null; res({ t: 'nack', reason: 'timeout' }); dropSocket(true); } }, 20000); });
   await new Promise(r => { firstHello = r; connect(); });
   for (;;) {
     try {
@@ -840,7 +866,7 @@ async function loopServer() {
       const started = Date.now();
       const prog = progressSender(unit.region);
       await runUnit(unit, verify, async (result, ms) => {
-        if (Date.now() - started > 80000) return;        // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
+        if (Date.now() - started > 80000 || sock?.readyState !== 1) return;        // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
         const r = await ask({ t: 'result', result: S.packResult(result), verify, hash: S.hashResult(result), ms: Math.round(ms) });
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send(prog(step, agents)));
