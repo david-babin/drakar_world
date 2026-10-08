@@ -69,8 +69,8 @@ Client → server: `hello {sigil}` · `lease` · `progress {region, step, agents
 computation, **differential**: only the groups that moved) · `result {result, hash, ms, verify}` (final groups,
 new items, and only the events the server keeps) · `resync` (sequence gap).
 Server → client: `hello {world, peers}` · `unit {unit, verify}` (the region's groups + settlements and routes
-within ±80 cells) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead, regions,
-totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (the others).
+within ±80 cells) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead, changed,
+removedSettlements, regions, totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (the others).
 
 Measured on a world at year 1,400 (300 groups, 45 settlements, 130 routes), compressed: `hello` 8 kB, `unit`
 1.9 kB, `result` 0.8 kB, `delta` 0.9 kB, progress 1.7 kB per unit. About 5 kB per unit (5 s) for a lone
@@ -133,6 +133,31 @@ sea is a "sea lane" (dashed). Each route adds +12 % yield to the settlement (max
 - 8-byte genome: hunger threshold, attraction to fertility, aggressiveness, wandering, founding threshold,
   split size, love of the coast, mutation rate. Inherited on split, mutated.
 - No explicit selection: whatever survives is passed on.
+
+### Long evolution (v1)
+
+All constants live in `RULES` (`public/sim.js`); the server embeds the world-level context in each unit, so
+the simulation stays deterministic and verifiable.
+
+- **Capacity grows with the land and with time.** A region holds `Σ fertility × 0.06 × tech` groups, where
+  `tech = 1 + log10(1 + tick / 20,000)` (1 at genesis, ~2 after a day of witnesses, ~3.5 after a thousand
+  hours). Tech also raises yields (up to +15 % per level). Barren regions hold at least 4 groups.
+- **Crossings.** A coastal group of 40+ souls may sail straight out over open sea (range 12 cells + 10 per
+  tech level) and land on fertile ground: the Americas and the islands get settled.
+- **Assimilation.** Every 4 seasons, a group whose surroundings (4 × 4-cell blocks) hold more than 3× as many
+  souls of another lineage may take on its colours (4 % per check). Big neighbours absorb small ones.
+- **Counterweights to domination.** When one lineage holds more than 40 % of the world, its groups may revolt
+  under a long-extinct name (once every 60 seasons, 25 %). When fewer than 6 lineages are alive, a name
+  extinct for 4,000+ seasons lands again on an empty fertile coast (rebirth).
+- **Settlements live.** A settlement surrounded by 1.5× more souls of another lineage passes to it; one left
+  unseen for ~480 seasons (shorter in scarcity) is abandoned and its routes vanish.
+- **Cities.** On the globe, groups of one lineage within 3 cells form a settlement area. Under 10,000 souls it
+  shows as its groups; each 10,000 makes it a bigger point — village, town, city — with up to three rings.
+
+`node tools/long-run.mjs [units] [every] [seed]` runs the world offline (~950 units ≈ one hour of a single
+witness) and prints population, lineages alive, the largest lineage's share, regions held, settlements,
+routes, settlement areas above 10,000 and state size. Over 25 simulated hours: ~300,000 souls, 10–12 lineages
+alive, the largest holding ~20 % of the world, 14–15 regions held.
 
 ### Ideas
 

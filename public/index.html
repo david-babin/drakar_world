@@ -552,7 +552,23 @@ function frame(now) {
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
-  for (const a of world.agents) if (!animated.has(a.id)) drawAgent(a, .8);
+  // settled world. Groups of one lineage within 3 cells of each other form a settlement area (single
+  // linkage, in world space). Below 10,000 souls it shows as its groups; each 10,000 makes it a bigger
+  // point — village, town, city — with its groups drawn faintly around the core.
+  const still = world.agents.filter(a => !animated.has(a.id) && a.pop > 0);
+  for (const c of urbanAreas(still)) {
+    const tier = Math.floor(c.pop / 10000);
+    if (!tier) { for (const a of c.members) drawAgent(a, .8); continue; }
+    for (const a of c.members) drawAgent(a, .28);
+    const p = projectLL(S.lonOf(c.x) * DEG, S.latOf(c.y) * DEG, o); if (!p) continue;
+    const k = 0.6 + 0.4 * p.c, al = 0.3 + 0.7 * p.c, col = `hsla(${hue(c.lin)},60%,68%,`;
+    const r = (3.4 + 1.8 * Math.sqrt(tier)) * k;
+    octx.fillStyle = col + (.9 * al) + ')';
+    octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
+    octx.strokeStyle = col + (.35 * al) + ')'; octx.lineWidth = .8;
+    for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(p.x, p.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
+    hits.push({ x: p.x, y: p.y, ag: c.core });
+  }
   for (const pr of peers.values()) for (const [id, x, y, lin, pop] of pr.agents) if (pop > 0) drawAgent({ id, x, y, lin, pop, food: 0, g: [] }, .9);
   if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
 
@@ -646,6 +662,37 @@ function parseLegacy(e) {
   legacyCache.set(e.text, out);
   return out;
 }
+// settlement areas: connected groups of one lineage (≤ 3 cells apart), with their pop-weighted centre.
+// Recomputed only when the settled set changes (the world, not the animation, drives it).
+let urbanKey = null, urbanCache = [];
+function urbanAreas(agents) {
+  const key = agents.length + ':' + (agents.length ? agents[0].id + ':' + agents[agents.length - 1].id : '') + ':' + world.tick;
+  if (key === urbanKey) return urbanCache;
+  const LINK = 3, cell = new Map(), seen = new Set(), out = [];
+  for (const a of agents) { const k = ((a.x / LINK) | 0) + ',' + ((a.y / LINK) | 0); (cell.get(k) || cell.set(k, []).get(k)).push(a); }
+  const GX = Math.ceil(S.W / LINK);
+  for (const a0 of agents) {
+    if (seen.has(a0)) continue;
+    const members = [], stack = [a0]; seen.add(a0);
+    while (stack.length) {
+      const a = stack.pop(); members.push(a);
+      const gx = (a.x / LINK) | 0, gy = (a.y / LINK) | 0;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        for (const b of cell.get(((gx + i + GX) % GX) + ',' + (gy + j)) || []) {
+          if (seen.has(b) || b.lin !== a0.lin) continue;
+          let dx = Math.abs(b.x - a.x); dx = Math.min(dx, S.W - dx);
+          if (dx <= LINK && Math.abs(b.y - a.y) <= LINK) { seen.add(b); stack.push(b); }
+        }
+      }
+    }
+    let pop = 0, core = members[0], sx = 0, sy = 0;
+    for (const m of members) { pop += m.pop; if (m.pop > core.pop) core = m; }
+    for (const m of members) { let dx = m.x - core.x; if (dx > S.W / 2) dx -= S.W; else if (dx < -S.W / 2) dx += S.W; sx += dx * m.pop; sy += (m.y - core.y) * m.pop; }
+    out.push({ lin: a0.lin, pop, members, core, x: core.x + sx / pop, y: core.y + sy / pop });
+  }
+  urbanKey = key; urbanCache = out;
+  return out;
+}
 function entryText(e) {
   let p = e.p || {}; const C = 'chronicle.';
   const legacy = e.text && !Object.keys(p).length;
@@ -661,6 +708,12 @@ function entryText(e) {
     case 'extinction': return t(C + 'extinction', { lin });
     case 'freeze': { const days = p.days || +(String(e.text || '').match(/\d+/) || [1])[0]; return t(C + (days > 1 ? 'freezeMany' : 'freezeOne'), { days }); }
     case 'wind': return p.regime ? t(C + 'wind.' + p.regime) : e.text || '';
+    case 'crossing': return t(C + 'crossing', { lin, where });
+    case 'assimilate': return t(C + 'assimilate', { lin, vs: lineageName(p.vs), where });
+    case 'revolt': return t(C + 'revolt', { lin, vs: lineageName(p.vs), where });
+    case 'takeover': return t(C + 'takeover', { name: p.name, lin, vs: lineageName(p.vs) });
+    case 'abandon': return t(C + 'abandon', { name: p.name });
+    case 'rebirth': return t(C + 'rebirth', { lin, where });
     default: return e.text || '';
   }
 }

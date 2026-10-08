@@ -1,13 +1,19 @@
 {
   "name": "English",
   "numberLocale": "en-GB",
-  "meta": { "description": "One world. It only moves forward while someone is watching." },
+  "meta": {
+    "description": "One world. It only moves forward while someone is watching."
+  },
   "year": "Year {n}",
   "yearLower": "year {n}",
   "index": "index",
   "climate": "climate",
   "live": "live",
-  "season": { "plenty": "plenty", "scarcity": "scarcity", "ordinary": "ordinary season" },
+  "season": {
+    "plenty": "plenty",
+    "scarcity": "scarcity",
+    "ordinary": "ordinary season"
+  },
   "status": {
     "computing": "computing · region",
     "sync": "synchronising",
@@ -20,8 +26,31 @@
     "When you leave, it will freeze.<br>When you return, it will have aged.",
     "It has no purpose.<br>It only has witnesses."
   ],
-  "machine": { "cpu": "cpu {n}", "mem": "{n} GB", "dps": "{n} decisions/s", "region": "region {r}", "online": "{n} online" },
-  "lineages": ["Amber", "Ash", "Lichen", "Ochre", "Salt", "Madder", "Indigo", "Copper", "Mist", "Saffron", "Slate", "Heather", "Jade", "Rust", "Foam", "Soot"],
+  "machine": {
+    "cpu": "cpu {n}",
+    "mem": "{n} GB",
+    "dps": "{n} decisions/s",
+    "region": "region {r}",
+    "online": "{n} online"
+  },
+  "lineages": [
+    "Amber",
+    "Ash",
+    "Lichen",
+    "Ochre",
+    "Salt",
+    "Madder",
+    "Indigo",
+    "Copper",
+    "Mist",
+    "Saffron",
+    "Slate",
+    "Heather",
+    "Jade",
+    "Rust",
+    "Foam",
+    "Soot"
+  ],
   "chronicle": {
     "genesis": "{n} longships make landfall. The world begins.",
     "found": "{name}, founded by {lin}.",
@@ -32,6 +61,16 @@
     "extinction": "The {lin} lineage dies out.",
     "freezeOne": "Frozen for a day. No witness.",
     "freezeMany": "Frozen for {days} days. No witness.",
-    "wind": { "plenty": "The winds turn: a season of plenty.", "scarcity": "The winds turn: scarcity.", "ordinary": "The winds fall." }
+    "wind": {
+      "plenty": "The winds turn: a season of plenty.",
+      "scarcity": "The winds turn: scarcity.",
+      "ordinary": "The winds fall."
+    },
+    "crossing": "{lin} crosses the open sea, {where}.",
+    "assimilate": "Groups of {vs} take the ways of {lin}, {where}.",
+    "revolt": "{lin} rises against {vs}, {where}.",
+    "takeover": "{name} passes from {vs} to {lin}.",
+    "abandon": "{name} is abandoned.",
+    "rebirth": "A forgotten name returns: {lin}, {where}."
   }
 }

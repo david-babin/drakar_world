@@ -103,7 +103,22 @@ const RX = 6, RY = 4;            // region split
 const RW = W / RX, RH = H / RY;  // 64 × 48 cells
 const NREG = RX * RY;
 const STEPS = 240;               // seasons simulated per work unit
-const MAX_AGENTS_REGION = 28;
+const MAX_AGENTS_REGION = 28;      // fallback when a unit carries no capacity
+// ---- rules of growth, contact and rebirth (tuned with tools/long-run.mjs) ----
+const RULES = {
+  capPerFert: 0.06,          // groups a region can hold per unit of summed fertility, before technology
+  techScale: 20000,          // tech = 1 + log10(1 + tick / techScale): ×1.3 after ~1 h of visits, ×3 after ~100 h, ×4 after ~1,000 h
+  voyageP: 0.0012,           // chance per season that a coastal group sets out across the sea (× tech)
+  voyageRange: 12,           // base crossing range in cells (+ 10 per tech level)
+  assimRatio: 3,             // a group joins a neighbouring lineage when that lineage is this many times stronger locally
+  assimP: 0.04,              // chance per check (every 4 seasons)
+  revoltShare: 0.40,         // a lineage holding more than this share of all souls breeds revolts
+  revoltP: 0.25,             // chance per 60 seasons that a revolt breaks out in a dominated region
+  abandonAfter: 480,         // seasons without anyone nearby before a settlement may be abandoned
+  rebirthAfter: 4000,        // seasons a lineage stays extinct before new longships of that name may land
+  minLineages: 6,            // rebirths happen while fewer lineages than this are alive
+};
+const techOf = tick => 1 + Math.log10(1 + Math.max(0, tick) / RULES.techScale);
 const LEASE_MS = 90_000;
 const FREEZE_MS = 6 * 3600_000;
 
@@ -204,11 +219,16 @@ const routeRange = tick => Math.min(70, 14 + tick / 90);
 function* simulateUnitGen(T, unit) {
   const rand = mulberry32(unit.seed);
   const agents = unit.agents.map(a => ({ ...a, g: a.g.slice() }));
-  const settlements = unit.settlements.slice();
+  const settlements = unit.settlements.map(st => ({ ...st }));
   const routes = unit.routes.slice();
   const climate = Math.max(-1, Math.min(1, unit.climate || 0));
   const yieldK = 1 + 0.45 * climate;                      // plenty / scarcity
+  const cap = unit.cap || MAX_AGENTS_REGION;              // how many groups this region can hold now
+  const tech = techOf(unit.tick);
+  const dom = unit.dominant || null, freeLin = unit.freeLin ?? -1;
   const newSettlements = [], newRoutes = [], events = [];
+  const changed = new Map(), removed = new Set();         // settlements of this region that changed lineage, were seen, or were abandoned
+  const own = st => regionOf(st.x, st.y) === unit.region;
   let nextId = unit.idBase, decisions = 0;
   const linkCount = new Map();
   for (const r of routes) { linkCount.set(r.a, (linkCount.get(r.a) || 0) + 1); linkCount.set(r.b, (linkCount.get(r.b) || 0) + 1); }
@@ -232,9 +252,9 @@ function* simulateUnitGen(T, unit) {
       for (const st of settlements) if (Math.abs(st.y - a.y) <= 1 && Math.abs(wrapX(st.x - a.x + W / 2) - W / 2) <= 1) { bonus *= 1.6 + 0.12 * Math.min(4, linkCount.get(st.id) || 0); break; }
 
       // economy: the land produces, not the hands
-      const cap = 30 + f * 150;
-      a.food += f * 2.0 * bonus * yieldK * Math.min(a.pop, cap) - a.pop;
-      if (a.food > a.pop * 3 && a.pop < cap * 1.5) { a.pop += Math.floor(a.pop * 0.05) + 1; a.food -= a.pop * 0.5; }
+      const carry = (30 + f * 150) * (0.85 + 0.15 * tech);
+      a.food += f * 2.0 * bonus * yieldK * Math.min(a.pop, carry) - a.pop;
+      if (a.food > a.pop * 3 && a.pop < carry * 1.5) { a.pop += Math.floor(a.pop * 0.05) + 1; a.food -= a.pop * 0.5; }
       if (a.food < 0) { a.pop -= Math.ceil(a.pop * (0.12 - 0.04 * climate)); a.food = 0; }
       if (a.pop <= 0) { a.pop = 0; events.push({ kind: 'death', tick, lin: a.lin, x: a.x, y: a.y }); continue; }
       a.food = Math.min(a.food, a.pop * 8);
@@ -250,6 +270,26 @@ function* simulateUnitGen(T, unit) {
             if (rand() < 0.08) events.push({ kind: 'raid', tick, lin: a.lin, vs: v.lin, x: a.x, y: a.y });
             break;
           }
+        }
+      }
+
+      // crossing: a coastal group sets out across the open sea and lands on a far shore (new continents)
+      if (T.coast[k] && a.pop >= 40 && rand() < RULES.voyageP * tech) {
+        const ang = rand() * 6.283185307179586, range = RULES.voyageRange + 10 * (tech - 1);
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        let sea = 0, tx = -1, ty = -1;
+        for (let d = 1; d <= range; d++) {
+          const nx = wrapX(Math.round(a.x + ca * d)), ny = Math.round(a.y + sa * d);
+          if (ny < 1 || ny >= H - 1) break;
+          const t = T.type[idx(nx, ny)];
+          if (t < 2) { sea++; continue; }
+          if (sea >= 3 && walkable(t) && T.fert[idx(nx, ny)] > 70) { tx = nx; ty = ny; }
+          break;
+        }
+        if (tx >= 0) {
+          a.x = tx; a.y = ty; a.stay = 0; a.food = Math.floor(a.food * 0.6);
+          events.push({ kind: 'crossing', tick, lin: a.lin, x: tx, y: ty });
+          continue;
         }
       }
 
@@ -285,7 +325,7 @@ function* simulateUnitGen(T, unit) {
       } else a.stay++;
 
       // split — plenty makes it easier
-      if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < MAX_AGENTS_REGION) {
+      if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < cap) {
         const free = [];
         for (const [dx, dy] of DIRS) {
           const nx = wrapX(a.x + dx), ny = a.y + dy;
@@ -301,6 +341,59 @@ function* simulateUnitGen(T, unit) {
       }
     }
     for (const b of born) agents.push(b);
+
+    // contact: every 4 seasons, local strength per lineage on a coarse grid (4×4 cells); a group surrounded by a
+    // lineage many times stronger than its own joins it — the small takes the colour of the large
+    if (s % 4 === 0) {
+      const B = 4, strength = new Map();
+      const bkey = (x, y) => Math.floor(y / B) * 1000 + Math.floor(wrapX(x) / B);
+      for (const a of agents) if (a.pop > 0) { const kk = bkey(a.x, a.y); let m = strength.get(kk); if (!m) strength.set(kk, m = new Map()); m.set(a.lin, (m.get(a.lin) || 0) + a.pop); }
+      for (const a of agents) {
+        if (a.pop <= 0) continue;
+        const bx = Math.floor(wrapX(a.x) / B), by = Math.floor(a.y / B), tot = new Map();
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const m = strength.get((by + dy) * 1000 + ((bx + dx + W / B) % (W / B))); if (!m) continue;
+          for (const [l, v] of m) tot.set(l, (tot.get(l) || 0) + v);
+        }
+        const mine = tot.get(a.lin) || 1;
+        let best = -1, bv = 0; for (const [l, v] of tot) if (l !== a.lin && v > bv) { bv = v; best = l; }
+        if (best >= 0 && bv > mine * RULES.assimRatio && rand() < RULES.assimP) {
+          if (rand() < 0.05) events.push({ kind: 'assimilate', tick, lin: best, vs: a.lin, x: a.x, y: a.y });
+          a.lin = best;
+        }
+      }
+    }
+
+    // revolt: in a region held by an overwhelming lineage, a faraway province breaks away under an extinct name
+    if (dom && dom.share > RULES.revoltShare && freeLin >= 0 && s % 60 === 30 && rand() < RULES.revoltP * (dom.share - RULES.revoltShare) / (1 - RULES.revoltShare) * 4) {
+      const pool = agents.filter(a => a.pop > 0 && a.lin === dom.lin);
+      if (pool.length >= 6) {
+        const c = pool[Math.floor(rand() * pool.length)];
+        for (const a of pool) if (dist(a.x, a.y, c.x, c.y) <= 6) a.lin = freeLin;
+        events.push({ kind: 'revolt', tick, lin: freeLin, vs: dom.lin, x: c.x, y: c.y });
+      }
+    }
+
+    // settlements of this region: seen when someone lives nearby, taken over by the strongest nearby lineage,
+    // abandoned when nobody has lived around them for long
+    if (s % 8 === 4) {
+      for (const st of settlements) {
+        if (!own(st) || removed.has(st.id)) continue;
+        const near = new Map();
+        for (const a of agents) if (a.pop > 0 && Math.abs(a.y - st.y) <= 2 && Math.abs(wrapX(a.x - st.x + W / 2) - W / 2) <= 2) near.set(a.lin, (near.get(a.lin) || 0) + a.pop);
+        if (near.size) {
+          let lin = st.lin, best = near.get(st.lin) || 0; for (const [l, v] of near) if (v > best * 1.5) { best = v; lin = l; }
+          if (lin !== st.lin || tick - (st.seen ?? st.founded) > 32) {
+            const was = st.lin; st.lin = lin; st.seen = tick; changed.set(st.id, st);
+            if (lin !== was && rand() < 0.3) events.push({ kind: 'takeover', tick, lin, vs: was, x: st.x, y: st.y, name: st.name });
+          }
+        } else if (tick - (st.seen ?? st.founded) > RULES.abandonAfter * (1 - 0.3 * climate) && rand() < 0.05) {
+          removed.add(st.id); changed.delete(st.id);
+          events.push({ kind: 'abandon', tick, lin: st.lin, x: st.x, y: st.y, name: st.name });
+        }
+      }
+      if (removed.size) for (let i = settlements.length - 1; i >= 0; i--) if (removed.has(settlements[i].id)) settlements.splice(i, 1);
+    }
 
     // routes: a settlement of the region, old enough, opens up to its nearest unlinked neighbour
     if (s % 8 === 0) {
@@ -329,7 +422,13 @@ function* simulateUnitGen(T, unit) {
     }
     yield { step: s, agents, decisions };
   }
-  return { region: unit.region, tick: unit.tick, steps: unit.steps, agents: agents.filter(a => a.pop > 0), events, settlements: newSettlements, routes: newRoutes, decisions };
+  const fresh = new Set(newSettlements.map(st => st.id));
+  return {
+    region: unit.region, tick: unit.tick, steps: unit.steps, agents: agents.filter(a => a.pop > 0), events,
+    settlements: newSettlements.filter(st => !removed.has(st.id)), routes: newRoutes.filter(r => !removed.has(r.a) && !removed.has(r.b)),
+    changed: [...changed.values()].filter(st => !fresh.has(st.id)).map(st => ({ id: st.id, lin: st.lin, seen: st.seen })),
+    removed: [...removed].filter(id => !fresh.has(id)), decisions,
+  };
 }
 
 function simulateUnit(T, unit) {
@@ -341,6 +440,7 @@ function hashResult(res) {
   const parts = res.agents.map(a => `${a.id}:${a.x}:${a.y}:${a.pop}:${Math.floor(a.food)}:${a.g.join('.')}`).sort();
   parts.push(...res.settlements.map(s => `S${s.id}:${s.x}:${s.y}:${s.name}`));
   parts.push(...res.routes.map(r => `R${r.a}:${r.b}:${r.sea}`));
+  parts.push(...(res.changed || []).map(c => `C${c.id}:${c.lin}:${c.seen}`), ...(res.removed || []).map(id => `X${id}`));
   return hashStr(parts.join('|')).toString(16).padStart(8, '0');
 }
 
@@ -350,8 +450,8 @@ const clone = o => JSON.parse(JSON.stringify(o));
 // Positional arrays rather than objects: a group weighs ~45 bytes instead of ~90; ~12 with permessage-deflate.
 const packAgent = a => [a.id, a.x, a.y, a.dx, a.dy, a.pop, Math.floor(a.food), a.lin, a.born, a.stay, ...a.g];
 const unpackAgent = p => ({ id: p[0], x: p[1], y: p[2], dx: p[3], dy: p[4], pop: p[5], food: p[6], lin: p[7], born: p[8], stay: p[9], g: p.slice(10, 18) });
-const packSettlement = s => [s.id, s.x, s.y, s.lin, s.founded, s.name, s.sigil || ''];
-const unpackSettlement = p => ({ id: p[0], x: p[1], y: p[2], lin: p[3], founded: p[4], name: p[5], sigil: p[6] || null });
+const packSettlement = s => [s.id, s.x, s.y, s.lin, s.founded, s.name, s.sigil || '', s.seen ?? s.founded];
+const unpackSettlement = p => ({ id: p[0], x: p[1], y: p[2], lin: p[3], founded: p[4], name: p[5], sigil: p[6] || null, seen: p[7] ?? p[4] });
 const packRoute = r => [r.a, r.b, r.lin, r.tick, r.sea, r.sigil || ''];
 const unpackRoute = p => ({ a: p[0], b: p[1], lin: p[2], tick: p[3], sea: p[4], sigil: p[5] || null });
 // Chronicle entries carry structured parameters, rendered client-side in the visitor's language.
@@ -365,11 +465,13 @@ function packResult(r) {
   const ev = [], seen = {};
   for (const e of r.events) {
     if (e.kind === 'found' && (seen.found = (seen.found || 0) + 1) <= 3) ev.push(e);
-    else if ((e.kind === 'raid' || e.kind === 'voyage' || e.kind === 'route') && !seen[e.kind]) { seen[e.kind] = 1; ev.push(e); }
+    else if (ONE_PER_UNIT.includes(e.kind) && !seen[e.kind]) { seen[e.kind] = 1; ev.push(e); }
   }
-  return { region: r.region, tick: r.tick, steps: r.steps, decisions: r.decisions, agents: r.agents.map(packAgent), settlements: r.settlements.map(packSettlement), routes: r.routes.map(packRoute), events: ev };
+  return { region: r.region, tick: r.tick, steps: r.steps, decisions: r.decisions, agents: r.agents.map(packAgent), settlements: r.settlements.map(packSettlement), routes: r.routes.map(packRoute), changed: (r.changed || []).map(c => [c.id, c.lin, c.seen]), removed: r.removed || [], events: ev };
 }
-const unpackResult = r => ({ ...r, agents: r.agents.map(unpackAgent), settlements: r.settlements.map(unpackSettlement), routes: r.routes.map(unpackRoute), events: r.events || [] });
+const unpackResult = r => ({ ...r, agents: r.agents.map(unpackAgent), settlements: r.settlements.map(unpackSettlement), routes: r.routes.map(unpackRoute), changed: (r.changed || []).map(([id, lin, seen]) => ({ id, lin, seen })), removed: r.removed || [], events: r.events || [] });
+// chronicle kinds kept at most once per unit (founding is kept up to three times)
+const ONE_PER_UNIT = ['raid', 'voyage', 'route', 'crossing', 'assimilate', 'revolt', 'takeover', 'abandon'];
 function unpackSnapshot(w) {
   const regions = w.regions.map(([id, tick, units, last]) => ({ id, tick, units, last }));
   return {
@@ -384,6 +486,8 @@ function unpackSnapshot(w) {
 function applyDelta(w, d) {
   const gone = new Set(d.removed);
   w.agents = w.agents.filter(a => !gone.has(a.id)).concat(d.agents.map(unpackAgent));
+  if (d.removedSettlements?.length) { const x = new Set(d.removedSettlements); w.settlements = w.settlements.filter(st => !x.has(st.id)); w.routes = w.routes.filter(r => !x.has(r.a) && !x.has(r.b)); }
+  if (d.changed?.length) { const byId = new Map(w.settlements.map(st => [st.id, st])); for (const [id, lin, seen] of d.changed) { const st = byId.get(id); if (st) { st.lin = lin; st.seen = seen; } } }
   for (const p of d.settlements) w.settlements.push(unpackSettlement(p));
   for (const p of d.routes) w.routes.push(unpackRoute(p));
   for (const [id, dead] of d.dead) { const L = w.lineages[id]; if (L) L.dead = dead; }
@@ -393,12 +497,29 @@ function applyDelta(w, d) {
 }
 
 // ---------- the world (canonical state) ----------
+// fertile coasts of real land masses (no islets), temperate to tropical latitudes
+function landfallCells(T) {
+  const out = [];
+  for (let k = 0; k < W * H; k++) {
+    const y = Math.floor(k / W), x = k % W, al = Math.abs(latOf(y));
+    if (T.type[k] !== 2 || !T.coast[k] || T.fert[k] < 110 || al > 58) continue;
+    let land = 0;
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const ny = y + dy; if (ny >= 0 && ny < H && walkable(T.type[idx(x + dx, ny)])) land++; }
+    if (land >= 38) out.push(k);
+  }
+  return out;
+}
+
 class World {
   constructor(state, T) {
     this.s = state;
     if (!this.s.routes) this.s.routes = [];
     for (const L of this.s.lineages) if (LINEAGES[L.id]) L.name = LINEAGES[L.id][0];   // states saved before the English names
     this.T = T;
+    // summed fertility per region (capacity) and the fertile continental coasts (landfalls for rebirths)
+    this.regionFert = new Float64Array(NREG);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const k = y * W + x; if (walkable(T.type[k])) this.regionFert[regionOf(x, y)] += T.fert[k] / 255; }
+    this.landfalls = landfallCells(T);
     this.leases = new Map();
     this.climate = 0; this.market = null; this.seq = 0;
     this.sentTicks = this.s.regions.map(r => r.tick);      // what deltas have already transmitted
@@ -406,15 +527,7 @@ class World {
 
   static create(seed, T, now = Date.now()) {
     const r = mulberry32(seed ^ 0x9e3779b9);
-    // fertile coasts of real land masses (no islets), temperate to tropical latitudes
-    const coastal = [];
-    for (let k = 0; k < W * H; k++) {
-      const y = Math.floor(k / W), x = k % W, al = Math.abs(latOf(y));
-      if (T.type[k] !== 2 || !T.coast[k] || T.fert[k] < 110 || al > 58) continue;
-      let land = 0;
-      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const ny = y + dy; if (ny >= 0 && ny < H && walkable(T.type[idx(x + dx, ny)])) land++; }
-      if (land >= 38) coastal.push(k);
-    }
+    const coastal = landfallCells(T);
     const agents = [], chosen = [];
     let minD = 36, tries = 0;
     while (agents.length < LINEAGES.length && tries++ < 120000) {
@@ -466,10 +579,18 @@ class World {
     const near = st => { let dx = Math.abs(wrapX(st.x - rx * RW - RW / 2 + W / 2) - W / 2); return dx <= RW / 2 + PAD && st.y >= ry * RH - PAD && st.y < (ry + 1) * RH + PAD; };
     const settlements = this.s.settlements.filter(near), ids = new Set(settlements.map(st => st.id));
     const routes = this.s.routes.filter(r => ids.has(r.a) || ids.has(r.b));
+    // world-level context for the unit (embedded, so the simulation stays deterministic and verifiable)
+    const pops = new Map(); let total = 0;
+    for (const a of this.s.agents) { pops.set(a.lin, (pops.get(a.lin) || 0) + a.pop); total += a.pop; }
+    let domLin = -1, domPop = 0; for (const [l, v] of pops) if (v > domPop) { domPop = v; domLin = l; }
+    const extinct = this.s.lineages.filter(L => L.dead != null).sort((a, b) => a.dead - b.dead);
     const unit = {
       region: reg.id, rx, ry, tick: reg.tick, steps: STEPS,
       seed: hashMix(this.s.seed, reg.id, reg.tick), idBase: this.s.nextId,
       climate: Math.round(this.climate * 1000) / 1000,
+      cap: Math.max(4, Math.round(this.regionFert[reg.id] * RULES.capPerFert * techOf(reg.tick))),
+      dominant: total ? { lin: domLin, share: Math.round(domPop / total * 1000) / 1000 } : null,
+      freeLin: extinct.length ? extinct[0].id : -1,
       agents: clone(agents), settlements: clone(settlements), routes: clone(routes),
     };
     this.s.nextId += 4000;
@@ -492,6 +613,13 @@ class World {
     this.s.agents = this.s.agents.filter(a => !ids.has(a.id)).concat(incoming);
     const newSettlements = [], newRoutes = [];
     for (const st of result.settlements || []) { const o = { id: st.id, x: wrapX(st.x | 0), y: st.y | 0, lin: st.lin | 0, name: String(st.name).slice(0, 24), founded: st.founded | 0, sigil }; this.s.settlements.push(o); newSettlements.push(o); }
+    // existing settlements of the leased region only: lineage takeovers, "seen" marks, abandonments
+    const inRegion = st => regionOf(st.x, st.y) === result.region;
+    const byId = new Map(this.s.settlements.map(st => [st.id, st]));
+    const changedOut = [], removedOut = [];
+    for (const c of result.changed || []) { const st = byId.get(c.id); if (st && inRegion(st)) { st.lin = c.lin | 0; st.seen = c.seen | 0; changedOut.push([st.id, st.lin, st.seen]); } }
+    for (const id of result.removed || []) { const st = byId.get(id); if (st && inRegion(st)) removedOut.push(id); }
+    if (removedOut.length) { const x = new Set(removedOut); this.s.settlements = this.s.settlements.filter(st => !x.has(st.id)); this.s.routes = this.s.routes.filter(r => !x.has(r.a) && !x.has(r.b)); }
     const have = new Set(this.s.settlements.map(s => s.id));
     for (const r of result.routes || []) if (have.has(r.a) && have.has(r.b)) { const o = { a: r.a, b: r.b, lin: r.lin | 0, tick: r.tick | 0, sea: r.sea ? 1 : 0, sigil }; this.s.routes.push(o); newRoutes.push(o); }
 
@@ -500,13 +628,31 @@ class World {
     const entries = [], seen = {};
     for (const e of (result.events || []).slice(0, 300)) {
       if (e.kind === 'found' && (seen.found = (seen.found || 0) + 1) <= 3) entries.push(this.addChronicle(e, sigil, now));
-      else if ((e.kind === 'raid' || e.kind === 'voyage' || e.kind === 'route') && !seen[e.kind]) { seen[e.kind] = 1; entries.push(this.addChronicle(e, sigil, now)); }
+      else if (ONE_PER_UNIT.includes(e.kind) && !seen[e.kind]) { seen[e.kind] = 1; entries.push(this.addChronicle(e, sigil, now)); }
     }
-    const dead = [];
+    const dead = [], living = new Set(this.s.agents.map(a => a.lin));
     for (const L of this.s.lineages) {
-      if (!L.dead && !this.s.agents.some(a => a.lin === L.id)) {
+      if (L.dead == null && !living.has(L.id)) {
         L.dead = reg.tick; dead.push([L.id, L.dead]);
         entries.push(this.addChronicle({ kind: 'extinction', tick: reg.tick, lin: L.id }, sigil, now));
+      } else if (L.dead != null && living.has(L.id)) { L.dead = null; dead.push([L.id, null]); }   // revived by a revolt
+    }
+    // rebirth: while too few lineages are alive, a long-extinct name lands again on an empty fertile coast
+    const spawned = [];
+    if (living.size < RULES.minLineages) {
+      const r = mulberry32(hashMix(this.s.seed, reg.tick, 0x5eed));
+      const L = this.s.lineages.filter(l => l.dead != null && reg.tick - l.dead > RULES.rebirthAfter).sort((a, b) => a.dead - b.dead)[0];
+      if (L) for (let tries = 0; tries < 400; tries++) {
+        const k = this.landfalls[Math.floor(r() * this.landfalls.length)], x = k % W, y = Math.floor(k / W);
+        if (this.s.agents.some(a => dist(a.x, a.y, x, y) < 18)) continue;
+        for (let i = 0; i < 3; i++) {
+          const a = { id: this.s.nextId++, x: wrapX(x + i - 1), y, dx: 0, dy: -1, pop: 42, food: 260, g: genome(r), lin: L.id, born: reg.tick, stay: 0 };
+          if (!walkable(this.T.type[idx(a.x, a.y)])) { a.x = x; }
+          this.s.agents.push(a); spawned.push(a);
+        }
+        L.dead = null; dead.push([L.id, null]);
+        entries.push(this.addChronicle({ kind: 'rebirth', tick: reg.tick, lin: L.id, x, y }, '—', now));
+        break;
       }
     }
     const c = (this.s.contributors[sigil] ||= { units: 0, ticks: 0, decisions: 0, first: now, last: now });
@@ -517,8 +663,9 @@ class World {
     const delta = {
       seq: this.seq, region: result.region, regionTick: reg.tick, at: now,
       regions: this.s.regions.filter((r, i) => r.tick !== this.sentTicks[i]).map(r => [r.id, r.tick]),   // every region whose tick moved (including realigned empty ones)
-      removed: l.ids, agents: incoming.map(packAgent),                     // every leased group is replaced by the result
+      removed: l.ids, agents: incoming.concat(spawned).map(packAgent),     // every leased group is replaced by the result
       settlements: newSettlements.map(packSettlement), routes: newRoutes.map(packRoute), dead,
+      changed: changedOut, removedSettlements: removedOut,
       totals: [this.s.totals.units, this.s.totals.ticks, this.s.totals.decisions], contributors: Object.keys(this.s.contributors).length,
     };
     this.sentTicks = this.s.regions.map(r => r.tick);
@@ -527,10 +674,13 @@ class World {
 
   // Stores a chronicle entry as structured parameters (no text): the client renders it in the visitor's language.
   //   found {name} · raid {vs} · voyage · route {from, to, sea} · extinction · freeze {days} · wind {regime} · genesis {n}
+  //   crossing · assimilate {vs} · revolt {vs} · takeover {name, vs} · abandon {name} · rebirth
   addChronicle(e, sigil, now) {
     const p = {};
     if (e.kind === 'found') p.name = e.name;
-    else if (e.kind === 'raid') p.vs = e.vs;
+    else if (e.kind === 'raid' || e.kind === 'assimilate' || e.kind === 'revolt') p.vs = e.vs;
+    else if (e.kind === 'takeover') { p.vs = e.vs; p.name = e.name; }
+    else if (e.kind === 'abandon') p.name = e.name;
     else if (e.kind === 'route') { p.from = e.from; p.to = e.to; p.sea = e.sea ? 1 : 0; }
     else if (e.kind === 'freeze') p.days = e.days;
     else if (e.kind === 'wind') p.regime = e.regime;
@@ -563,7 +713,7 @@ const $ = id => document.getElementById(id);
 // ---------- language ----------
 // UI strings live in locales/<lang>.json and are injected by the server (or by build-demo.mjs).
 // Choice: ?lang= → saved choice → first supported language in the browser preferences → English.
-const LOCALES = {"en":{"name":"English","numberLocale":"en-GB","meta":{"description":"One world. It only moves forward while someone is watching."},"year":"Year {n}","yearLower":"year {n}","index":"index","climate":"climate","live":"live","season":{"plenty":"plenty","scarcity":"scarcity","ordinary":"ordinary season"},"status":{"computing":"computing · region","sync":"synchronising","connecting":"connecting","reconnecting":"reconnecting","demo":"demo · local world"},"whispers":["You are witness <b>{me}</b>.<br>This world exists only because someone is watching.","When you leave, it will freeze.<br>When you return, it will have aged.","It has no purpose.<br>It only has witnesses."],"machine":{"cpu":"cpu {n}","mem":"{n} GB","dps":"{n} decisions/s","region":"region {r}","online":"{n} online"},"lineages":["Amber","Ash","Lichen","Ochre","Salt","Madder","Indigo","Copper","Mist","Saffron","Slate","Heather","Jade","Rust","Foam","Soot"],"chronicle":{"genesis":"{n} longships make landfall. The world begins.","found":"{name}, founded by {lin}.","raid":"{lin} raids {vs}, {where}.","voyage":"{lin} sails along the coast, {where}.","route":"Road from {from} to {to}.","seaRoute":"Sea lane from {from} to {to}.","extinction":"The {lin} lineage dies out.","freezeOne":"Frozen for a day. No witness.","freezeMany":"Frozen for {days} days. No witness.","wind":{"plenty":"The winds turn: a season of plenty.","scarcity":"The winds turn: scarcity.","ordinary":"The winds fall."}}},"fr":{"name":"Français","numberLocale":"fr-FR","meta":{"description":"Un monde. Il n'avance que si quelqu'un le regarde."},"year":"An {n}","yearLower":"an {n}","index":"indice","climate":"climat","live":"direct","season":{"plenty":"abondance","scarcity":"disette","ordinary":"saison ordinaire"},"status":{"computing":"calcul · région","sync":"synchronisation","connecting":"connexion","reconnecting":"reconnexion","demo":"mode démo · monde local"},"whispers":["Vous êtes le témoin <b>{me}</b>.<br>Ce monde n'existe que parce qu'on le regarde.","Quand vous partirez, il se figera.<br>Quand vous reviendrez, il aura vieilli.","Il n'a pas de but.<br>Il n'a que des témoins."],"machine":{"cpu":"cpu {n}","mem":"{n} go","dps":"{n} décisions/s","region":"région {r}","online":"{n} en ligne"},"lineages":["Ambre","Cendre","Lichen","Ocre","Sel","Garance","Indigo","Cuivre","Brume","Safran","Ardoise","Bruyère","Jade","Rouille","Écume","Suie"],"chronicle":{"genesis":"{n} drakkars touchent terre. Le monde commence.","found":"{name}, fondée par {lin}.","raid":"{lin} razzie {vs}, {where}.","voyage":"{lin} longe la côte, {where}.","route":"Route de {from} à {to}.","seaRoute":"Voie maritime de {from} à {to}.","extinction":"La lignée {lin} s'éteint.","freezeOne":"Gel d'un jour. Aucun témoin.","freezeMany":"Gel de {days} jours. Aucun témoin.","wind":{"plenty":"Les vents tournent : saison d'abondance.","scarcity":"Les vents tournent : disette.","ordinary":"Les vents retombent."}}}} || {};
+const LOCALES = {"en":{"name":"English","numberLocale":"en-GB","meta":{"description":"One world. It only moves forward while someone is watching."},"year":"Year {n}","yearLower":"year {n}","index":"index","climate":"climate","live":"live","season":{"plenty":"plenty","scarcity":"scarcity","ordinary":"ordinary season"},"status":{"computing":"computing · region","sync":"synchronising","connecting":"connecting","reconnecting":"reconnecting","demo":"demo · local world"},"whispers":["You are witness <b>{me}</b>.<br>This world exists only because someone is watching.","When you leave, it will freeze.<br>When you return, it will have aged.","It has no purpose.<br>It only has witnesses."],"machine":{"cpu":"cpu {n}","mem":"{n} GB","dps":"{n} decisions/s","region":"region {r}","online":"{n} online"},"lineages":["Amber","Ash","Lichen","Ochre","Salt","Madder","Indigo","Copper","Mist","Saffron","Slate","Heather","Jade","Rust","Foam","Soot"],"chronicle":{"genesis":"{n} longships make landfall. The world begins.","found":"{name}, founded by {lin}.","raid":"{lin} raids {vs}, {where}.","voyage":"{lin} sails along the coast, {where}.","route":"Road from {from} to {to}.","seaRoute":"Sea lane from {from} to {to}.","extinction":"The {lin} lineage dies out.","freezeOne":"Frozen for a day. No witness.","freezeMany":"Frozen for {days} days. No witness.","wind":{"plenty":"The winds turn: a season of plenty.","scarcity":"The winds turn: scarcity.","ordinary":"The winds fall."},"crossing":"{lin} crosses the open sea, {where}.","assimilate":"Groups of {vs} take the ways of {lin}, {where}.","revolt":"{lin} rises against {vs}, {where}.","takeover":"{name} passes from {vs} to {lin}.","abandon":"{name} is abandoned.","rebirth":"A forgotten name returns: {lin}, {where}."}},"fr":{"name":"Français","numberLocale":"fr-FR","meta":{"description":"Un monde. Il n'avance que si quelqu'un le regarde."},"year":"An {n}","yearLower":"an {n}","index":"indice","climate":"climat","live":"direct","season":{"plenty":"abondance","scarcity":"disette","ordinary":"saison ordinaire"},"status":{"computing":"calcul · région","sync":"synchronisation","connecting":"connexion","reconnecting":"reconnexion","demo":"mode démo · monde local"},"whispers":["Vous êtes le témoin <b>{me}</b>.<br>Ce monde n'existe que parce qu'on le regarde.","Quand vous partirez, il se figera.<br>Quand vous reviendrez, il aura vieilli.","Il n'a pas de but.<br>Il n'a que des témoins."],"machine":{"cpu":"cpu {n}","mem":"{n} go","dps":"{n} décisions/s","region":"région {r}","online":"{n} en ligne"},"lineages":["Ambre","Cendre","Lichen","Ocre","Sel","Garance","Indigo","Cuivre","Brume","Safran","Ardoise","Bruyère","Jade","Rouille","Écume","Suie"],"chronicle":{"genesis":"{n} drakkars touchent terre. Le monde commence.","found":"{name}, fondée par {lin}.","raid":"{lin} razzie {vs}, {where}.","voyage":"{lin} longe la côte, {where}.","route":"Route de {from} à {to}.","seaRoute":"Voie maritime de {from} à {to}.","extinction":"La lignée {lin} s'éteint.","freezeOne":"Gel d'un jour. Aucun témoin.","freezeMany":"Gel de {days} jours. Aucun témoin.","wind":{"plenty":"Les vents tournent : saison d'abondance.","scarcity":"Les vents tournent : disette.","ordinary":"Les vents retombent."},"crossing":"{lin} traverse la haute mer, {where}.","assimilate":"Des groupes {vs} prennent les usages {lin}, {where}.","revolt":"{lin} se soulève contre {vs}, {where}.","takeover":"{name} passe de {vs} à {lin}.","abandon":"{name} est abandonnée.","rebirth":"Un nom oublié revient : {lin}, {where}."}}} || {};
 const SUPPORTED = Object.keys(LOCALES).length ? Object.keys(LOCALES) : ['en'];
 function pickLang() {
   const q = new URLSearchParams(location.search).get('lang');
@@ -1016,7 +1166,35 @@ function frame(now) {
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
-  for (const a of world.agents) if (!animated.has(a.id)) drawAgent(a, .8);
+  // settled world: nearby groups of one lineage merge on screen into one point, sized by tiers of
+  // 10,000 souls — camps, then villages, towns, cities. The merge radius is in pixels, so zooming in splits them.
+  const CL = 11, grid = new Map(), clusters = [];
+  const still = world.agents.filter(a => !animated.has(a.id) && a.pop > 0).sort((a, b) => b.pop - a.pop);
+  for (const a of still) {
+    const p = project(a.x, a.y, o); if (!p) continue;
+    const gx = Math.floor(p.x / CL), gy = Math.floor(p.y / CL);
+    let best = null, bd = CL * CL;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) for (const c of grid.get((gx + i) + ',' + (gy + j)) || []) {
+      if (c.lin !== a.lin) continue; const d = (c.x - p.x) ** 2 + (c.y - p.y) ** 2; if (d < bd) { bd = d; best = c; }
+    }
+    if (best) { const w = best.pop + a.pop; best.x = (best.x * best.pop + p.x * a.pop) / w; best.y = (best.y * best.pop + p.y * a.pop) / w; best.pop = w; best.c = Math.max(best.c, p.c); best.n++; }
+    else { const c = { x: p.x, y: p.y, c: p.c, lin: a.lin, pop: a.pop, n: 1, a }; clusters.push(c); const k = gx + ',' + gy; (grid.get(k) || grid.set(k, []).get(k)).push(c); }
+  }
+  for (const c of clusters) {
+    const tier = Math.floor(c.pop / 10000), k = 0.6 + 0.4 * c.c, al = 0.3 + 0.7 * c.c;
+    const col = `hsla(${hue(c.lin)},60%,66%,`;
+    if (!tier) {                                   // camp / hamlet: a plain dot
+      octx.fillStyle = col + (.8 * al) + ')';
+      octx.beginPath(); octx.arc(c.x, c.y, Math.min(4, 1 + Math.sqrt(c.pop) * .2) * k, 0, 6.283); octx.fill();
+    } else {                                       // village → town → city: a bigger core, one more ring per tier step
+      const r = (3.2 + 1.6 * Math.sqrt(tier)) * k;
+      octx.fillStyle = col + (.85 * al) + ')';
+      octx.beginPath(); octx.arc(c.x, c.y, r, 0, 6.283); octx.fill();
+      octx.strokeStyle = col + (.35 * al) + ')'; octx.lineWidth = .8;
+      for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(c.x, c.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
+    }
+    hits.push({ x: c.x, y: c.y, ag: c.a });
+  }
   for (const pr of peers.values()) for (const [id, x, y, lin, pop] of pr.agents) if (pop > 0) drawAgent({ id, x, y, lin, pop, food: 0, g: [] }, .9);
   if (lease) for (const a of lease.agents) if (a.pop > 0) drawAgent(a, 1);
 
@@ -1125,6 +1303,12 @@ function entryText(e) {
     case 'extinction': return t(C + 'extinction', { lin });
     case 'freeze': { const days = p.days || +(String(e.text || '').match(/\d+/) || [1])[0]; return t(C + (days > 1 ? 'freezeMany' : 'freezeOne'), { days }); }
     case 'wind': return p.regime ? t(C + 'wind.' + p.regime) : e.text || '';
+    case 'crossing': return t(C + 'crossing', { lin, where });
+    case 'assimilate': return t(C + 'assimilate', { lin, vs: lineageName(p.vs), where });
+    case 'revolt': return t(C + 'revolt', { lin, vs: lineageName(p.vs), where });
+    case 'takeover': return t(C + 'takeover', { name: p.name, lin, vs: lineageName(p.vs) });
+    case 'abandon': return t(C + 'abandon', { name: p.name });
+    case 'rebirth': return t(C + 'rebirth', { lin, where });
     default: return e.text || '';
   }
 }

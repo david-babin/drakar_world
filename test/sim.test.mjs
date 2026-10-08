@@ -25,10 +25,10 @@ console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  
 
 {
   const { unpackSnapshot, applyDelta, packUnit, unpackUnit, packResult, unpackResult, packEntry, unpackEntry } = await import('../public/sim.js');
-  const w2 = World.create(7, TERRAIN);
+  const wireRun = (w2, units, label) => {
   let client = unpackSnapshot(JSON.parse(JSON.stringify(w2.snapshot(1))));
-  let wire = { delta: 0, unit: 0, result: 0, n: 0 };
-  for (let i = 0; i < 72; i++) {
+  let wire = { delta: 0, unit: 0, result: 0, n: 0, changed: 0, removed: 0 };
+  for (let i = 0; i < units; i++) {
     w2.setMarket({ change: Math.cos(i / 9) });
     const u = w2.lease('TEST-0002');
     const packedUnit = JSON.stringify(packUnit(u)); wire.unit += packedUnit.length;
@@ -40,16 +40,30 @@ console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  
     if (!ok.ok) throw new Error('integration refused: ' + ok.reason);
     for (const e of ok.entries) { const back = unpackEntry(JSON.parse(JSON.stringify(packEntry(e)))); if (back.kind !== e.kind || JSON.stringify(back.p) !== JSON.stringify(e.p)) throw new Error('chronicle entry altered by the round trip'); }
     const d = JSON.parse(JSON.stringify(ok.delta)); wire.delta += JSON.stringify(d).length; wire.n++;
+    wire.changed += (d.changed || []).length; wire.removed += (d.removedSettlements || []).length;
     applyDelta(client, d);
   }
   const ref = unpackSnapshot(JSON.parse(JSON.stringify(w2.snapshot(1))));
-  const key = a => `${a.id}:${a.x}:${a.y}:${a.pop}:${a.food}:${a.g.join('.')}`;
+  const key = a => `${a.id}:${a.x}:${a.y}:${a.pop}:${a.food}:${a.lin}:${a.g.join('.')}`;
   const same = (xs, ys, k) => xs.length === ys.length && new Set(xs.map(k)).size === new Set([...xs, ...ys].map(k)).size;
-  if (!same(client.agents, ref.agents, key)) throw new Error('delta: groups diverge');
-  if (!same(client.settlements, ref.settlements, s => s.id)) throw new Error('delta: settlements diverge');
-  if (!same(client.routes, ref.routes, r => r.a + ':' + r.b)) throw new Error('delta: routes diverge');
-  if (client.regions.some((r, i) => r.tick !== ref.regions[i].tick)) throw new Error('delta: regions diverge');
-  if (client.lineages.some((L, i) => L.dead !== ref.lineages[i].dead)) throw new Error('delta: lineages diverge');
-  if (client.year !== ref.year || client.seq !== ref.seq) throw new Error('delta: year or sequence diverge');
+  if (!same(client.agents, ref.agents, key)) throw new Error(label + ' delta: groups diverge');
+  if (!same(client.settlements, ref.settlements, s => `${s.id}:${s.lin}:${s.seen}`)) throw new Error(label + ' delta: settlements diverge');
+  if (!same(client.routes, ref.routes, r => r.a + ':' + r.b)) throw new Error(label + ' delta: routes diverge');
+  if (client.regions.some((r, i) => r.tick !== ref.regions[i].tick)) throw new Error(label + ' delta: regions diverge');
+  if (client.lineages.some((L, i) => L.dead !== ref.lineages[i].dead)) throw new Error(label + ' delta: lineages diverge');
+  if (client.year !== ref.year || client.seq !== ref.seq) throw new Error(label + ' delta: year or sequence diverge');
+  return { ref, wire };
+  };
+  const w2 = World.create(7, TERRAIN);
+  const { ref, wire } = wireRun(w2, 200, 'main');
+  // rebirth: a world left with 4 lineages must bring a long-extinct one back, and clients must follow
+  const w3 = World.create(9, TERRAIN);
+  w3.s.agents = w3.s.agents.filter(a => a.lin < 4);
+  for (const L of w3.s.lineages) if (L.id >= 4) L.dead = -10000;
+  const r3 = wireRun(w3, 24, 'rebirth');
+  const reborn = w3.s.chronicle.filter(e => e.kind === 'rebirth').length;
+  if (!reborn) throw new Error('no rebirth in a depleted world');
+  console.log(`rebirth OK · ${reborn} names returned · ${w3.s.lineages.filter(l => l.dead == null).length} lineages alive`);
+  console.log(`settlement changes over the run: ${wire.changed} changed, ${wire.removed} abandoned`);
   console.log(`wire format OK · year ${ref.year} · delta ${(wire.delta / wire.n / 1024).toFixed(1)} kB · unit ${(wire.unit / wire.n / 1024).toFixed(1)} kB · result ${(wire.result / wire.n / 1024).toFixed(1)} kB · snapshot ${(JSON.stringify(w2.snapshot(1)).length / 1024).toFixed(1)} kB`);
 }

@@ -134,7 +134,7 @@ const sigilOf = (ws, given) => {
   const h = hashStr(ip + (ws.req.headers['user-agent'] || '')).toString(36).toUpperCase().padStart(8, '0');
   return `${h.slice(0, 4)}-${h.slice(4, 8)}`;
 };
-const compact = agents => (Array.isArray(agents) ? agents : []).slice(0, 64).map(a => [a[0] | 0, a[1] | 0, a[2] | 0, a[3] | 0, a[4] | 0]);
+const compact = agents => (Array.isArray(agents) ? agents : []).slice(0, 256).map(a => [a[0] | 0, a[1] | 0, a[2] | 0, a[3] | 0, a[4] | 0]);
 
 const hub = attachWebSocket(server, '/ws', ws => {
   const me = { sigil: null, region: null, step: 0, at: 0 };
@@ -160,7 +160,7 @@ const hub = attachWebSocket(server, '/ws', ws => {
         if (me.region == null || (m.region | 0) !== me.region) return;
         me.step = m.step | 0; me.at = Date.now();
         const out = { t: 'progress', sigil: me.sigil, region: me.region, step: me.step, agents: compact(m.agents) };
-        if (m.full) out.full = 1; if (Array.isArray(m.gone) && m.gone.length) out.gone = m.gone.slice(0, 64).map(v => v | 0);
+        if (m.full) out.full = 1; if (Array.isArray(m.gone) && m.gone.length) out.gone = m.gone.slice(0, 256).map(v => v | 0);
         hub.broadcast(out, ws);
       }
       else if (m.t === 'resync') { ws.send({ t: 'world', world: world.snapshot(hub.size) }); }
