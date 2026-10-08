@@ -1,135 +1,142 @@
-# drakar.tech — un monde, calculé par ceux qui le regardent
+# drakar.tech — one world, computed by those who watch it
 
-Page d'accueil de la holding. Aucune vocation. Un seul monde, persistant, commun à tous les
-visiteurs : chaque navigateur qui ouvre la page reçoit une région, y simule 240 saisons, et renvoie
-le résultat. Le monde n'avance que si quelqu'un le regarde.
+The holding company's home page. It has no purpose. One persistent world, shared by every visitor: each
+browser that opens the page receives a region, simulates 240 seasons of it, and sends the result back. The
+world only moves forward while someone is watching.
 
-## Lancer
+## Running
 
-    cp .env.example .env      # puis FINNHUB_KEY=… (optionnel)
-    npm start                 # Node ≥ 22, aucune dépendance (node:sqlite et WebSocket intégrés)
+    cp .env.example .env      # then FINNHUB_KEY=… (optional)
+    npm start                 # Node ≥ 22, no dependencies (built-in node:sqlite and WebSocket)
     # → http://localhost:8787
 
-Variables : `PORT` (8787), `DB` (./monde.db), `SEED` (graine du terrain, ne change rien une fois la base créée).
+Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once the database exists).
 
 ### Production (Coolify)
 
-Build Pack « Dockerfile » (Node 22, aucune dépendance). Port exposé : `8787`.
-Variables : `FINNHUB_KEY` (secret), éventuellement `MARKET_SYMBOL`. `DB` vaut `/app/data/monde.db` dans
-l'image : monter un **volume persistant sur `/app/data`**, sinon le monde repart de zéro à chaque déploiement.
-Une seule instance (état partagé en mémoire + SQLite).
+"Dockerfile" build pack (Node 22, no dependencies). Exposed port: `8787`.
+Variables: `FINNHUB_KEY` (secret), optionally `MARKET_SYMBOL`. `DB` is `/app/data/world.db` in the image:
+mount a **persistent volume on `/app/data`**, otherwise the world starts over on every deployment. A legacy
+`monde.db` found next to it is adopted on startup. Single instance (shared in-memory state + SQLite).
 
-Ouvrir `demo.html` directement (sans serveur) ou `/?demo` : le monde vit dans l'onglet, avec un passé pré-calculé.
+Open `demo.html` directly (no server) or `/?demo`: the world lives in the tab, with a precomputed past.
+
+## Languages
+
+The page is available in English and French. The language is picked from `?lang=`, then the visitor's saved
+choice, then the browser preferences, defaulting to English; a discreet `en fr` switch sits next to `.tech`.
+UI strings live in `locales/<lang>.json` and are injected into the page by the server (no extra request).
+Adding a language means adding a file. The chronicle is stored as structured entries (kind + parameters) and
+rendered client-side in the visitor's language; lineage names are translated by id.
 
 ## Architecture
 
-- `public/sim.js` — simulation déterministe partagée serveur/navigateur (agents, génome, unités de travail,
-  classe `World` : bail / intégration / chronique). Le terrain est chargé, pas généré (`loadTerrain`).
-- `tools/build-terre.mjs` — fabrique les données Terre, une fois (`npm run build:terre -- --etopo … --bmng …
-  --land …` ; dépendances de dev : jpeg-js, pngjs, d3-contour) : ETOPO1 (altitude, via la rampe de
-  couleurs), Blue Marble (humidité, indice de végétation) et Natural Earth 1:50m (côtes). Entrées :
-  `etopo1.jpg` et `bmng.jpg` du paquet PyPI `basemap-data` (simple zip à ouvrir), `land-50m.json` du paquet
-  npm `world-atlas`. Sorties versionnées dans `public/` :
-  `terre.bin` (grille 384 × 192 : type + fertilité, 147 Ko, 19 en brotli), `fond.png` (768 × 384, classes et
-  niveau d'altitude, 35 Ko), `terres.bin` (1 419 anneaux déroulés, 84 Ko), `cotes.bin` (1 424 arcs, 86 Ko),
-  `niveaux.bin` (courbes 500 / 1000 / 2000 / 3000 / 4000 m, 107 Ko). Lignes en delta zigzag-varint.
-- `server.js` — HTTP statique + API de lecture (`/api/world`, `/api/market`, `/api/stats`), WebSocket
-  `/ws` pour tout le reste, persistance SQLite (état courant, snapshots horaires, journal des unités).
-- `market.js` — l'indice comme climat. Avec `FINNHUB_KEY` : cotation SPY (ETF répliquant le S&P 500,
-  l'indice lui-même étant payant) en REST au démarrage et toutes les 10 min, puis **trades en direct par
-  WebSocket** (`wss://ws.finnhub.io`) — le climat respire pendant la séance, diffusé au plus une fois par
-  seconde. Sans clé : Stooq → Yahoo → FRED, puis marche aléatoire datée. Cache SQLite.
-- `tools/build-icons.mjs` — rend `public/icons/icon.svg` en PNG 32 / 180 / 192 / 512 (`npm run build:icons`, nécessite
-  `playwright` installé globalement ou en dev). `favicon.svg` est la variante sans fond pour l'onglet ;
-  `manifest.webmanifest` permet l'ajout à l'écran d'accueil en plein écran.
-- `ws-mini.js` — serveur WebSocket RFC 6455 minimal (texte, fragmentation, ping/pong), sans dépendance.
-- `public/index.html` — tout le géographique est rendu par le GPU dans une seule passe WebGL : le disque et
-  les classes de terrain (`fond.png`), les **terres** (anneaux Natural Earth remplis par parité de stencil
-  dans une texture 4096 × 2048, une fois au chargement), les **côtes et courbes de niveau** (quads extrudés
-  dans le vertex shader, indices 16 bits par blocs). Le canvas 2D ne porte que la vie : groupes, comptoirs,
-  routes en arcs de grand cercle, régions. Puis HUD, chronique, boucle de calcul. Glisser pour tourner, molette / pincement pour zoomer
-  (confiné au globe : la page ne zoome jamais). Après 6 s sans manipulation, la caméra glisse d'elle-même
-  vers la région en cours de calcul — la vôtre, sinon celle d'un autre témoin.
+- `public/sim.js` — deterministic simulation shared by server and browser (agents, genome, work units, the
+  `World` class: lease / integrate / chronicle, wire format, deltas). Terrain is loaded, not generated.
+- `tools/build-earth.mjs` — builds the Earth data once (`npm run build:earth -- --etopo … --bmng … --land …`;
+  dev dependencies: jpeg-js, pngjs, d3-contour): ETOPO1 (elevation, through its colour ramp), Blue Marble
+  (moisture, vegetation index) and Natural Earth 1:50m (coasts). Inputs: `etopo1.jpg` and `bmng.jpg` from the
+  PyPI package `basemap-data` (a plain zip), `land-50m.json` from the npm package `world-atlas`. Outputs,
+  versioned in `public/`: `terrain.bin` (384 × 192 grid: type + fertility, 147 kB, 19 brotli), `base.png`
+  (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings, 84 kB), `coasts.bin`
+  (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines in zigzag-varint deltas.
+- `server.js` — static files + read API (`/api/world`, `/api/market`, `/api/stats`), WebSocket `/ws` for
+  everything else, SQLite persistence (current state, hourly snapshots, unit log).
+- `market.js` — the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking the S&P 500, the
+  index itself being paid data) over REST at startup and every 10 min, then **live trades over WebSocket**
+  (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per second.
+  Without a key: Stooq → Yahoo → FRED, then a dated random walk. SQLite cache.
+- `ws-mini.js` — minimal RFC 6455 WebSocket server with permessage-deflate, no dependencies.
+- `tools/build-icons.mjs` — renders `public/icons/icon.svg` to PNG 32 / 180 / 192 / 512 (`npm run build:icons`,
+  requires `playwright`). `favicon.svg` is the background-less variant for the tab; `manifest.webmanifest`
+  allows adding the page to a home screen, full screen.
+- `public/index.html` — everything geographic is drawn by the GPU in one WebGL pass: the disc and terrain
+  classes (`base.png`), the **land** (Natural Earth rings filled by stencil parity into a 4096 × 2048 texture,
+  once at load), the **coasts and contour lines** (quads extruded in the vertex shader, 16-bit indices in
+  chunks). The 2D canvas only carries life: groups, settlements, great-circle routes, regions. Then HUD,
+  chronicle, compute loop. Drag to rotate, wheel / pinch to zoom (confined to the globe: the page never
+  zooms). After 6 s without interaction, the camera glides to the region being computed — yours, otherwise
+  another witness's.
 
-### Protocole (WebSocket `/ws`)
+### Protocol (WebSocket `/ws`)
 
-Tout le dynamique passe par un WebSocket texte JSON avec `permessage-deflate` (négocié, sans contexte partagé,
-zlib intégré ; `ws-mini.js`). Les objets voyagent en **tableaux positionnels** (`packAgent`, `packSettlement`,
-`packRoute`, `packEntry` dans `sim.js`) et l'état ne circule en entier qu'au `hello` : ensuite, **des deltas**.
+Everything dynamic goes through a JSON text WebSocket with `permessage-deflate` (negotiated, no context
+takeover, built-in zlib; `ws-mini.js`). Objects travel as **positional arrays** (`packAgent`,
+`packSettlement`, `packRoute`, `packEntry` in `sim.js`) and the full state only travels on `hello`: after that,
+**deltas**.
 
-Client → serveur : `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (toutes les 500 ms
-pendant le calcul, **différentiel** : seuls les groupes qui ont bougé) · `result {result, hash, ms, verify}`
-(groupes finaux, nouveautés, et seulement les événements que le serveur retient) · `resync` (trou de séquence).
-Serveur → client : `hello {world, peers}` · `unit {unit, verify}` (groupes de la région + comptoirs et routes du
-voisinage à ±80 cellules) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead,
-regions, totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (les autres).
+Client → server: `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (every 500 ms during
+computation, **differential**: only the groups that moved) · `result {result, hash, ms, verify}` (final groups,
+new items, and only the events the server keeps) · `resync` (sequence gap).
+Server → client: `hello {world, peers}` · `unit {unit, verify}` (the region's groups + settlements and routes
+within ±80 cells) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead, regions,
+totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (the others).
 
-Mesuré sur un monde à l'an 1 400 (300 groupes, 45 comptoirs, 130 routes), compressé : `hello` 8 Ko, `unit`
-1,9 Ko, `result` 0,8 Ko, `delta` 0,9 Ko, progression 1,7 Ko par unité. Soit ~5 Ko par unité (5 s) pour un
-visiteur seul, et ~2,6 Ko par unité des autres reçus par chacun — contre 60 Ko d'état complet par unité avant.
+Measured on a world at year 1,400 (300 groups, 45 settlements, 130 routes), compressed: `hello` 8 kB, `unit`
+1.9 kB, `result` 0.8 kB, `delta` 0.9 kB, progress 1.7 kB per unit. About 5 kB per unit (5 s) for a lone
+visitor, and ~2.6 kB per unit of the others received by each one — versus 60 kB of full state per unit before.
 
-1. Le serveur attribue la région la plus en retard, ses groupes, une graine dérivée de
-   (graine monde, région, tick) et le climat du moment. Bail de 90 s.
-2. Le navigateur exécute `simulateUnitGen` en l'animant (~4 s par unité) et diffuse sa progression :
-   **les autres visiteurs voient sa région, son pourcentage et ses groupes bouger en direct**.
-3. Le serveur intègre, horodate la chronique, diffuse le delta numéroté. Une unité sur 7 est recalculée
-   côté serveur (déterminisme → même hash, sinon rejet). Un client qui voit un trou de séquence redemande
-   l'état complet.
+1. The server assigns the most lagging region, its groups, a seed derived from (world seed, region, tick)
+   and the current climate. 90 s lease.
+2. The browser runs `simulateUnitGen`, animating it (~4 s per unit), and broadcasts its progress:
+   **other visitors see its region, its percentage and its groups move live**.
+3. The server integrates, timestamps the chronicle, broadcasts the numbered delta. One unit in 7 is
+   recomputed server-side (determinism → same hash, otherwise rejected). A client that sees a sequence gap
+   asks for the full state again.
 
-### Statique
+### Static files
 
-Lu une fois au démarrage, précompressé en **brotli** (q11) et gzip, servi avec `ETag` (304 si inchangé) et
-`Vary: Accept-Encoding`. Première visite ≈ 290 Ko (page 14, sim 8, terre 19, terres 60, côtes 68, niveaux 80,
-fond 35, polices à part) ; visites suivantes ≈ 22 Ko puis des 304. Les fichiers de lignes sont en
-**delta zigzag-varint** (1 à 2 octets par coordonnée). En dev, le dossier est rechargé à chaud.
+Read once at startup, precompressed with **brotli** (q11) and gzip, served with `ETag` (304 when unchanged)
+and `Vary: Accept-Encoding`. Earth data is served under **versioned URLs** (`?v=<fingerprint>`) with a
+one-year immutable cache: a changed file changes URL, so a stale cache can never be read by newer code. First
+visit ≈ 290 kB; later visits ≈ 22 kB, then 304s. In dev, the folder is hot-reloaded.
 
-### Ce que voit le visiteur
+### What the visitor sees
 
-Rien n'explique la page. En haut à gauche, l'ère ; en haut à droite, le témoin (nom de code, indice, climat) ;
-en bas à gauche, la région en calcul ; en bas à droite, la chronique, atténuée. Après cinq secondes, un halo
-respire derrière le bloc du témoin (animation CSS composée, `opacity` + `transform` seulement, aucun coût
-CPU) ; au contact, un murmure de trois secondes — et, une fois seulement, ce que la page fait de la machine.
-Au survol, seuls les comptoirs se nomment.
+Nothing explains the page. Top left, the era; top right, the witness (code name, index, climate); bottom
+left, the region being computed; bottom right, the faded chronicle. After five seconds a halo breathes behind
+the witness block (composited CSS animation, `opacity` + `transform` only, no CPU cost); on contact, a
+three-second whisper — and, once only, what the page does with the machine. On hover, only settlements give
+their name.
 
-### Reprise après veille / coupure
+### Recovery after sleep / network loss
 
-Le serveur envoie un battement toutes les 20 s. Côté client, 45 s sans message = connexion morte : fermeture
-forcée, reconnexion avec backoff (1 → 15 s). Le retour de veille, le retour en ligne, le retour au premier
-plan (`pageshow`, `online`, `focus`, `visibilitychange`) déclenchent une vérification immédiate et remettent
-le backoff à 1 s. Un bail demandé sans réponse pendant 20 s ferme aussi la connexion. Une unité dont le calcul
-a été interrompu plus de 80 s (onglet caché, veille) n'est pas renvoyée : son bail a expiré, la région a été
-réattribuée. Côté serveur, le flux Finnhub muet depuis 3 min est fermé et rouvert.
+The server sends a heartbeat every 20 s. Client side, 45 s without a message = dead connection: forced close,
+reconnect with backoff (1 → 15 s). Waking up, coming back online, returning to the foreground (`pageshow`,
+`online`, `focus`, `visibilitychange`) trigger an immediate check and reset the backoff to 1 s. A lease
+request unanswered for 20 s also closes the connection. A unit whose computation was interrupted for more than
+80 s (hidden tab, sleep) is not sent: its lease expired and the region was reassigned. Server side, a Finnhub
+feed silent for 3 min is closed and reopened.
 
-### Climat = marché
+### Climate = market
 
-Le serveur lit la variation de l'indice depuis la clôture précédente (en direct pendant la séance avec
-Finnhub) et la convertit en `climate ∈ [-1, 1]` (`variation % / 1,5`). Quand le régime change
-(abondance / ordinaire / disette, seuils ±0,25), la chronique l'annonce : « Les vents tournent ». Cette valeur est **embarquée dans chaque unité de travail**, donc la
-simulation reste déterministe et vérifiable. Effets : rendement des terres × (1 + 0,45 climat),
-famine plus douce ou plus dure, scissions facilitées en expansion, razzias plus fréquentes en
-contraction, portée des routes ± 25 %. Le halo du globe vire à l'ambre en hausse, au bleu en baisse.
+The server reads the index change since the previous close (live during the session with Finnhub) and turns
+it into `climate ∈ [-1, 1]` (`change % / 1.5`). When the regime changes (plenty / ordinary / scarcity,
+thresholds ±0.25), the chronicle announces it: "The winds turn". This value is **embedded in every work
+unit**, so the simulation stays deterministic and verifiable. Effects: land yield × (1 + 0.45 climate), milder
+or harsher famine, easier splits in expansion, more frequent raids in contraction, route range ± 25 %. The
+globe's halo turns amber when rising, blue when falling.
 
 ### Routes
 
-Un comptoir vieux de 40 saisons s'ouvre vers le comptoir non relié le plus proche, dans une portée qui
-grandit avec l'âge du monde (14 → 70 cellules). Entre lignées différentes, seulement après 200 saisons.
-Une route qui traverse la mer est « maritime » (pointillés). Chaque route ajoute +12 % de rendement
-au comptoir (max 4).
+A settlement 40 seasons old opens up to the nearest unlinked settlement, within a range that grows with the
+age of the world (14 → 70 cells). Between different lineages, only after 200 seasons. A route crossing the
+sea is a "sea lane" (dashed). Each route adds +12 % yield to the settlement (max 4).
 
-### Règles de vie (v0)
+### Rules of life (v0)
 
-- La terre produit, pas les bras : `vivres += fertilité × 2 × min(pop, capacité) − pop`. Une cellule se partage.
-- Un comptoir (fondé après 24 saisons de sédentarité sur une terre fertile) multiplie la production par 1,6.
-- La Terre : grille 384 × 192 (0,94° par cellule), 24 régions, calottes gelées (Antarctique, Groenland).
-  Fertilité = végétation Blue Marble × altitude × latitude (froid au-delà de 45°). Les seize drakkars accostent
-  sur des côtes fertiles de vraies masses continentales (pas d'îlots), entre 58° S et 58° N.
-- Génome 8 octets : seuil de faim, attrait de la fertilité, agressivité, errance, seuil de fondation,
-  taille de scission, goût du littoral, taux de mutation. Hérité à la scission, muté.
-- Pas de sélection explicite : ce qui survit se transmet.
+- The land produces, not the hands: `food += fertility × 2 × min(pop, capacity) − pop`. A cell is shared.
+- A settlement (founded after 24 settled seasons on fertile land) multiplies production by 1.6.
+- The Earth: 384 × 192 grid (0.94° per cell), 24 regions, frozen ice caps (Antarctica, Greenland).
+  Fertility = Blue Marble vegetation × elevation × latitude (cold beyond 45°). The sixteen longships land on
+  fertile coasts of real land masses (no islets), between 58° S and 58° N.
+- 8-byte genome: hunger threshold, attraction to fertility, aggressiveness, wandering, founding threshold,
+  split size, love of the coast, mutation rate. Inherited on split, mutated.
+- No explicit selection: whatever survives is passed on.
 
-### Pistes
+### Ideas
 
-- Grille plus fine + WebGL si le monde doit grossir ; régions 4×3 → 8×6.
-- Climat piloté par la télémétrie des visiteurs (batterie faible = hiver, mobile = sécheresse).
-- Export snapshot → PNG daté chaque semaine, pour une « frise » publique.
-- Le sigle du visiteur est dérivé de sa machine côté client ; l'option serveur (IP + UA) existe en repli.
+- Finer grid if the world needs to grow; 6×4 regions → 8×6.
+- Climate driven by visitor telemetry (low battery = winter, mobile = drought).
+- Weekly dated snapshot → PNG export, for a public timeline.
+- The visitor's sigil is derived from their machine client-side; the server option (IP + UA) is a fallback.

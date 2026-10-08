@@ -1,9 +1,9 @@
 {
   "name": "drakar-tech",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "drakar.tech — un monde calculé par ceux qui le regardent",
+  "description": "drakar.tech — one world, computed by those who watch it",
   "engines": {
     "node": ">=22"
   },
@@ -11,7 +11,7 @@
     "start": "node --no-warnings --env-file-if-exists=.env server.js",
     "test": "node test/sim.test.mjs",
     "demo": "node build-demo.mjs",
-    "build:terre": "node tools/build-terre.mjs",
+    "build:earth": "node tools/build-earth.mjs",
     "build:icons": "node tools/build-icons.mjs"
   },
   "devDependencies": {

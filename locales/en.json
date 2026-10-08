@@ -1,0 +1,37 @@
+{
+  "name": "English",
+  "numberLocale": "en-GB",
+  "meta": { "description": "One world. It only moves forward while someone is watching." },
+  "year": "Year {n}",
+  "yearLower": "year {n}",
+  "index": "index",
+  "climate": "climate",
+  "live": "live",
+  "season": { "plenty": "plenty", "scarcity": "scarcity", "ordinary": "ordinary season" },
+  "status": {
+    "computing": "computing · region",
+    "sync": "synchronising",
+    "connecting": "connecting",
+    "reconnecting": "reconnecting",
+    "demo": "demo · local world"
+  },
+  "whispers": [
+    "You are witness <b>{me}</b>.<br>This world exists only because someone is watching.",
+    "When you leave, it will freeze.<br>When you return, it will have aged.",
+    "It has no purpose.<br>It only has witnesses."
+  ],
+  "machine": { "cpu": "cpu {n}", "mem": "{n} GB", "dps": "{n} decisions/s", "region": "region {r}", "online": "{n} online" },
+  "lineages": ["Amber", "Ash", "Lichen", "Ochre", "Salt", "Madder", "Indigo", "Copper", "Mist", "Saffron", "Slate", "Heather", "Jade", "Rust", "Foam", "Soot"],
+  "chronicle": {
+    "genesis": "{n} longships make landfall. The world begins.",
+    "found": "{name}, founded by {lin}.",
+    "raid": "{lin} raids {vs}, {where}.",
+    "voyage": "{lin} sails along the coast, {where}.",
+    "route": "Road from {from} to {to}.",
+    "seaRoute": "Sea lane from {from} to {to}.",
+    "extinction": "The {lin} lineage dies out.",
+    "freezeOne": "Frozen for a day. No witness.",
+    "freezeMany": "Frozen for {days} days. No witness.",
+    "wind": { "plenty": "The winds turn: a season of plenty.", "scarcity": "The winds turn: scarcity.", "ordinary": "The winds fall." }
+  }
+}

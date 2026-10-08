@@ -1,38 +1,39 @@
-// sim.js — simulation déterministe partagée entre le serveur et les navigateurs.
-// Le monde est une sphère : grille équirectangulaire bouclée en longitude, pôles gelés.
-// Tout n'utilise que de l'arithmétique IEEE 754 de base et un PRNG entier : deux machines
-// qui reçoivent la même unité produisent le même résultat.
+// sim.js — deterministic simulation shared by the server and the browsers.
+// The world is the real Earth on an equirectangular grid that wraps in longitude, with frozen poles.
+// Everything uses only basic IEEE 754 arithmetic and an integer PRNG: two machines given the same
+// work unit produce the same result.
 
-export const W = 384, H = 192;          // grille (lon × lat), 0,94° par cellule
-export const RX = 6, RY = 4;            // découpage en régions
-export const RW = W / RX, RH = H / RY;  // 64 × 48 cellules
+export const W = 384, H = 192;          // grid (lon × lat), 0.94° per cell
+export const RX = 6, RY = 4;            // region split
+export const RW = W / RX, RH = H / RY;  // 64 × 48 cells
 export const NREG = RX * RY;
-export const STEPS = 240;               // saisons simulées par unité de travail
+export const STEPS = 240;               // seasons simulated per work unit
 export const MAX_AGENTS_REGION = 28;
 export const LEASE_MS = 90_000;
 export const FREEZE_MS = 6 * 3600_000;
 
+// lineage id → [name, hue]; names are translated client-side by id
 export const LINEAGES = [
-  ['Ambre', 38], ['Cendre', 205], ['Lichen', 95], ['Ocre', 20], ['Sel', 185],
-  ['Garance', 350], ['Indigo', 235], ['Cuivre', 10], ['Brume', 260], ['Safran', 48],
-  ['Ardoise', 215], ['Bruyère', 305], ['Jade', 150], ['Rouille', 0], ['Écume', 170], ['Suie', 270],
+  ['Amber', 38], ['Ash', 205], ['Lichen', 95], ['Ochre', 20], ['Salt', 185],
+  ['Madder', 350], ['Indigo', 235], ['Copper', 10], ['Mist', 260], ['Saffron', 48],
+  ['Slate', 215], ['Heather', 305], ['Jade', 150], ['Rust', 0], ['Foam', 170], ['Soot', 270],
 ];
 export const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX', 'XXI', 'XXII', 'XXIII', 'XXIV'];
 
-// ---------- géométrie ----------
+// ---------- geometry ----------
 export const lonOf = x => ((x + 0.5) / W) * 360 - 180;
 export const latOf = y => 90 - ((y + 0.5) / H) * 180;
 export const wrapX = x => ((x % W) + W) % W;
 export const idx = (x, y) => y * W + wrapX(x);
 export const regionOf = (x, y) => Math.floor(y / RH) * RX + Math.floor(wrapX(x) / RW);
-// distance en cellules, corrigée de la latitude et du bouclage
+// distance in cells, corrected for latitude and wrap-around
 export function dist(ax, ay, bx, by) {
   let dx = Math.abs(ax - bx); if (dx > W / 2) dx = W - dx;
   const c = Math.cos(((ay + by) / 2 / H - 0.5) * Math.PI);
   return Math.sqrt(dx * dx * c * c + (ay - by) * (ay - by));
 }
 
-// ---------- aléa déterministe ----------
+// ---------- deterministic randomness ----------
 export function mulberry32(a) {
   return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
@@ -53,14 +54,14 @@ export function hashMix(...nums) {
 }
 
 // ---------- terrain ----------
-// La Terre, réelle : public/terre.bin produit par tools/build-terre.py (ETOPO1 + Blue Marble + Natural Earth).
-// Format : "TERR", largeur et hauteur (uint16 LE), puis W×H types, puis W×H fertilités.
-// type : 0 mer profonde · 1 haut-fond · 2 plaine · 3 collines · 4 montagne · 5 glace
+// The real Earth: public/terrain.bin, produced by tools/build-earth.mjs (ETOPO1 + Blue Marble + Natural Earth).
+// Format: "TERR", width and height (uint16 LE), then W×H types, then W×H fertility values.
+// type: 0 deep sea · 1 shelf · 2 plain · 3 hills · 4 mountain · 5 ice
 export function loadTerrain(bytes) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== 'TERR') throw new Error('terre.bin : en-tête invalide');
+  if (String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== 'TERR') throw new Error('terrain.bin: invalid header');
   const w = u8[4] | (u8[5] << 8), h = u8[6] | (u8[7] << 8);
-  if (w !== W || h !== H) throw new Error(`terre.bin : ${w}×${h}, attendu ${W}×${H}`);
+  if (w !== W || h !== H) throw new Error(`terrain.bin: ${w}×${h}, expected ${W}×${H}`);
   const type = u8.slice(8, 8 + w * h), fert = u8.slice(8 + w * h, 8 + 2 * w * h), coast = new Uint8Array(w * h);
   const at = (x, y) => type[y * w + ((x % w + w) % w)];
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -71,7 +72,7 @@ export function loadTerrain(bytes) {
 }
 export const walkable = t => t >= 2 && t <= 4;
 
-// ---------- génome ----------
+// ---------- genome ----------
 export function genome(r) { const g = []; for (let i = 0; i < 8; i++) g.push(Math.floor(r() * 256)); return g; }
 function decode(g) {
   return {
@@ -85,13 +86,14 @@ function mutate(g, rate, r) {
   return out;
 }
 
+// Norse-sounding place names
 const SYL_A = ['Hol', 'Vik', 'Skar', 'Thor', 'Bjar', 'Hal', 'Ran', 'Grim', 'Eyr', 'Nor', 'Fjal', 'Odd', 'Ulf', 'Ask', 'Hvit', 'Sva', 'Kal', 'Ingi', 'Vé', 'Hrafn'];
 const SYL_B = ['heim', 'vík', 'nes', 'fjörd', 'stad', 'by', 'dal', 'gard', 'ey', 'vang', 'holt', 'mark', 'vatn', 'strönd', 'borg', 'sund'];
 function placeName(r) { return SYL_A[Math.floor(r() * SYL_A.length)] + SYL_B[Math.floor(r() * SYL_B.length)]; }
 
 const DIRS = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
 
-// une route traverse-t-elle la mer ? (échantillonnage du segment, avec bouclage)
+// does a route cross the sea? (samples the segment, with wrap-around)
 function crossesSea(T, a, b) {
   let dx = b.x - a.x; if (dx > W / 2) dx -= W; if (dx < -W / 2) dx += W;
   const n = Math.max(2, Math.ceil(Math.hypot(dx, b.y - a.y)));
@@ -99,10 +101,10 @@ function crossesSea(T, a, b) {
   for (let i = 1; i < n; i++) { const x = Math.round(a.x + dx * i / n), y = Math.round(a.y + (b.y - a.y) * i / n); if (T.type[idx(x, y)] < 2) sea++; }
   return sea > n * 0.15;
 }
-// portée des routes : grandit avec l'âge du monde (les civilisations avancent)
+// route range grows with the age of the world (civilisations advance)
 export const routeRange = tick => Math.min(70, 14 + tick / 90);
 
-// ---------- une unité de travail ----------
+// ---------- one work unit ----------
 // unit = { region, rx, ry, tick, steps, seed, idBase, climate, agents, settlements, routes }
 export function* simulateUnitGen(T, unit) {
   const rand = mulberry32(unit.seed);
@@ -110,7 +112,7 @@ export function* simulateUnitGen(T, unit) {
   const settlements = unit.settlements.slice();
   const routes = unit.routes.slice();
   const climate = Math.max(-1, Math.min(1, unit.climate || 0));
-  const yieldK = 1 + 0.45 * climate;                      // abondance / disette
+  const yieldK = 1 + 0.45 * climate;                      // plenty / scarcity
   const newSettlements = [], newRoutes = [], events = [];
   let nextId = unit.idBase, decisions = 0;
   const linkCount = new Map();
@@ -134,7 +136,7 @@ export function* simulateUnitGen(T, unit) {
       let bonus = 1 / (occ.get(k)?.length || 1);
       for (const st of settlements) if (Math.abs(st.y - a.y) <= 1 && Math.abs(wrapX(st.x - a.x + W / 2) - W / 2) <= 1) { bonus *= 1.6 + 0.12 * Math.min(4, linkCount.get(st.id) || 0); break; }
 
-      // économie : la terre produit, pas les bras
+      // economy: the land produces, not the hands
       const cap = 30 + f * 150;
       a.food += f * 2.0 * bonus * yieldK * Math.min(a.pop, cap) - a.pop;
       if (a.food > a.pop * 3 && a.pop < cap * 1.5) { a.pop += Math.floor(a.pop * 0.05) + 1; a.food -= a.pop * 0.5; }
@@ -142,7 +144,7 @@ export function* simulateUnitGen(T, unit) {
       if (a.pop <= 0) { a.pop = 0; events.push({ kind: 'death', tick, lin: a.lin, x: a.x, y: a.y }); continue; }
       a.food = Math.min(a.food, a.pop * 8);
 
-      // razzia — plus fréquente quand les temps sont durs
+      // raid — more frequent when times are hard
       if (G.aggr > 0.45) {
         for (const [dx, dy] of DIRS) {
           const o = occ.get(idx(a.x + dx, a.y + dy));
@@ -156,7 +158,7 @@ export function* simulateUnitGen(T, unit) {
         }
       }
 
-      // fondation
+      // founding
       const hungry = a.food / a.pop < G.hunger;
       if (!hungry && a.stay >= 24 && f >= G.foundF && a.pop >= 28 && rand() < 0.25
           && !settlements.some(st => dist(st.x, st.y, a.x, a.y) <= 5)) {
@@ -167,7 +169,7 @@ export function* simulateUnitGen(T, unit) {
         continue;
       }
 
-      // déplacement
+      // movement
       if (hungry || rand() < G.wander) {
         let best = -1e9, bx = a.x, by = a.y, bdx = 0, bdy = 0;
         for (const [dx, dy] of DIRS) {
@@ -187,7 +189,7 @@ export function* simulateUnitGen(T, unit) {
         } else a.stay++;
       } else a.stay++;
 
-      // scission — l'abondance la facilite
+      // split — plenty makes it easier
       if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < MAX_AGENTS_REGION) {
         const free = [];
         for (const [dx, dy] of DIRS) {
@@ -205,7 +207,7 @@ export function* simulateUnitGen(T, unit) {
     }
     for (const b of born) agents.push(b);
 
-    // routes : un comptoir de la région, assez ancien, s'ouvre au plus proche voisin non relié
+    // routes: a settlement of the region, old enough, opens up to its nearest unlinked neighbour
     if (s % 8 === 0) {
       const range = routeRange(tick) * (1 + 0.25 * climate);
       for (const st of settlements) {
@@ -216,7 +218,7 @@ export function* simulateUnitGen(T, unit) {
           if (o.id === st.id) continue;
           const key = st.id < o.id ? st.id + ':' + o.id : o.id + ':' + st.id;
           if (linked.has(key)) continue;
-          if (o.lin !== st.lin && tick - o.founded < 200) continue;   // le commerce entre lignées vient plus tard
+          if (o.lin !== st.lin && tick - o.founded < 200) continue;   // trade between lineages comes later
           const d = dist(st.x, st.y, o.x, o.y);
           if (d < bd) { bd = d; best = o; }
         }
@@ -247,22 +249,23 @@ export function hashResult(res) {
   return hashStr(parts.join('|')).toString(16).padStart(8, '0');
 }
 
-// ---------- le monde (état canonique) ----------
 const clone = o => JSON.parse(JSON.stringify(o));
 
-// ---------- format fil ----------
-// Tableaux positionnels plutôt qu'objets : un groupe pèse ~45 octets au lieu de ~90 ; avec permessage-deflate, ~12.
+// ---------- wire format ----------
+// Positional arrays rather than objects: a group weighs ~45 bytes instead of ~90; ~12 with permessage-deflate.
 export const packAgent = a => [a.id, a.x, a.y, a.dx, a.dy, a.pop, Math.floor(a.food), a.lin, a.born, a.stay, ...a.g];
 export const unpackAgent = p => ({ id: p[0], x: p[1], y: p[2], dx: p[3], dy: p[4], pop: p[5], food: p[6], lin: p[7], born: p[8], stay: p[9], g: p.slice(10, 18) });
 export const packSettlement = s => [s.id, s.x, s.y, s.lin, s.founded, s.name, s.sigil || ''];
 export const unpackSettlement = p => ({ id: p[0], x: p[1], y: p[2], lin: p[3], founded: p[4], name: p[5], sigil: p[6] || null });
 export const packRoute = r => [r.a, r.b, r.lin, r.tick, r.sea, r.sigil || ''];
 export const unpackRoute = p => ({ a: p[0], b: p[1], lin: p[2], tick: p[3], sea: p[4], sigil: p[5] || null });
-export const packEntry = e => [e.t, e.tick, e.kind, e.lin, e.x, e.y, e.text, e.sigil];
-export const unpackEntry = p => ({ t: p[0], tick: p[1], kind: p[2], lin: p[3], x: p[4], y: p[5], text: p[6], sigil: p[7], an: `An ${Math.floor(p[1] / 4)}` });
+// Chronicle entries carry structured parameters, rendered client-side in the visitor's language.
+// Entries written before that change only have a `text`; it is forwarded as a fallback.
+export const packEntry = e => [e.t, e.tick, e.kind, e.lin ?? null, e.x ?? null, e.y ?? null, e.p || null, e.sigil, e.p ? null : (e.text || null)];
+export const unpackEntry = p => ({ t: p[0], tick: p[1], kind: p[2], lin: p[3], x: p[4], y: p[5], p: p[6] || {}, sigil: p[7], text: p[8] || null });
 export const packUnit = u => ({ ...u, agents: u.agents.map(packAgent), settlements: u.settlements.map(packSettlement), routes: u.routes.map(packRoute) });
 export const unpackUnit = u => ({ ...u, agents: u.agents.map(unpackAgent), settlements: u.settlements.map(unpackSettlement), routes: u.routes.map(unpackRoute) });
-// le serveur ne retient que quelques événements : on n'envoie que ceux-là
+// the server keeps only a few events: only those are sent
 export function packResult(r) {
   const ev = [], seen = {};
   for (const e of r.events) {
@@ -282,7 +285,7 @@ export function unpackSnapshot(w) {
     climate: w.climate, market: w.market, get tick() { return Math.min(...this.regions.map(r => r.tick)); }, get year() { return Math.floor(this.regions.reduce((n, r) => n + r.tick, 0) / this.regions.length / 4); },
   };
 }
-// applique un delta (sortie d'integrate) à un monde client dépaqueté
+// applies a delta (output of integrate) to an unpacked client world
 export function applyDelta(w, d) {
   const gone = new Set(d.removed);
   w.agents = w.agents.filter(a => !gone.has(a.id)).concat(d.agents.map(unpackAgent));
@@ -294,19 +297,21 @@ export function applyDelta(w, d) {
   w.totals = { units: d.totals[0], ticks: d.totals[1], decisions: d.totals[2] }; w.contributors = d.contributors; w.lastActivity = d.at; w.seq = d.seq;
 }
 
+// ---------- the world (canonical state) ----------
 export class World {
   constructor(state, T) {
     this.s = state;
     if (!this.s.routes) this.s.routes = [];
+    for (const L of this.s.lineages) if (LINEAGES[L.id]) L.name = LINEAGES[L.id][0];   // states saved before the English names
     this.T = T;
     this.leases = new Map();
     this.climate = 0; this.market = null; this.seq = 0;
-    this.sentTicks = this.s.regions.map(r => r.tick);      // ce que les deltas ont déjà transmis
+    this.sentTicks = this.s.regions.map(r => r.tick);      // what deltas have already transmitted
   }
 
   static create(seed, T, now = Date.now()) {
     const r = mulberry32(seed ^ 0x9e3779b9);
-    // côtes fertiles de vraies masses continentales (pas d'îlots), latitudes tempérées à tropicales
+    // fertile coasts of real land masses (no islets), temperate to tropical latitudes
     const coastal = [];
     for (let k = 0; k < W * H; k++) {
       const y = Math.floor(k / W), x = k % W, al = Math.abs(latOf(y));
@@ -332,7 +337,7 @@ export class World {
       seed, created: now, lastActivity: now, nextId: 1000,
       agents, settlements: [], routes: [], regions,
       lineages: LINEAGES.map(([name, hue], i) => ({ id: i, name, hue, dead: null })),
-      chronicle: [{ t: now, tick: 0, kind: 'genesis', text: 'Seize drakkars touchent terre. Le monde commence.', sigil: '—' }],
+      chronicle: [{ t: now, tick: 0, kind: 'genesis', p: { n: LINEAGES.length }, sigil: '—' }],
       contributors: {}, totals: { units: 0, ticks: 0, decisions: 0 },
     }, T);
   }
@@ -346,7 +351,7 @@ export class World {
     for (const [r, l] of this.leases) if (now - l.at > LEASE_MS) this.leases.delete(r);
     if (now - this.s.lastActivity > FREEZE_MS) {
       const days = Math.max(1, Math.round((now - this.s.lastActivity) / 86400_000));
-      this.addChronicle({ kind: 'freeze', tick: this.tick, text: `Gel de ${days} jour${days > 1 ? 's' : ''}. Aucun témoin.` }, '—', now);
+      this.addChronicle({ kind: 'freeze', tick: this.tick, days }, '—', now);
     }
     this.s.lastActivity = now;
     const living = this.s.regions.filter(r => this.agentsIn(r.id).length > 0);
@@ -361,7 +366,7 @@ export class World {
     pool.sort((a, b) => a.tick - b.tick || a.id - b.id);
     const reg = pool[0];
     const agents = this.agentsIn(reg.id);
-    // comptoirs et routes du voisinage seulement (portée des routes ≤ 70 cellules) : l'unité reste petite
+    // only the neighbourhood's settlements and routes (route range ≤ 70 cells): the unit stays small
     const rx = reg.id % RX, ry = Math.floor(reg.id / RX), PAD = 80;
     const near = st => { let dx = Math.abs(wrapX(st.x - rx * RW - RW / 2 + W / 2) - W / 2); return dx <= RW / 2 + PAD && st.y >= ry * RH - PAD && st.y < (ry + 1) * RH + PAD; };
     const settlements = this.s.settlements.filter(near), ids = new Set(settlements.map(st => st.id));
@@ -379,10 +384,10 @@ export class World {
 
   integrate(result, sigil, { now = Date.now(), verify = false } = {}) {
     const l = this.leases.get(result.region);
-    if (!l || l.sigil !== sigil || l.tick !== result.tick) return { ok: false, reason: 'bail invalide ou expiré' };
+    if (!l || l.sigil !== sigil || l.tick !== result.tick) return { ok: false, reason: 'lease invalid or expired' };
     if (verify) {
       const ref = simulateUnit(this.T, l.unit);
-      if (hashResult(ref) !== hashResult(result)) { this.leases.delete(result.region); return { ok: false, reason: 'résultat divergent' }; }
+      if (hashResult(ref) !== hashResult(result)) { this.leases.delete(result.region); return { ok: false, reason: 'result mismatch' }; }
     }
     this.leases.delete(result.region);
     const ids = new Set(l.ids);
@@ -416,8 +421,8 @@ export class World {
     this.seq++;
     const delta = {
       seq: this.seq, region: result.region, regionTick: reg.tick, at: now,
-      regions: this.s.regions.filter((r, i) => r.tick !== this.sentTicks[i]).map(r => [r.id, r.tick]),   // toutes les régions dont le tick a bougé (dont les vides réalignées)
-      removed: l.ids, agents: incoming.map(packAgent),                     // tous les groupes loués sont remplacés par le résultat
+      regions: this.s.regions.filter((r, i) => r.tick !== this.sentTicks[i]).map(r => [r.id, r.tick]),   // every region whose tick moved (including realigned empty ones)
+      removed: l.ids, agents: incoming.map(packAgent),                     // every leased group is replaced by the result
       settlements: newSettlements.map(packSettlement), routes: newRoutes.map(packRoute), dead,
       totals: [this.s.totals.units, this.s.totals.ticks, this.s.totals.decisions], contributors: Object.keys(this.s.contributors).length,
     };
@@ -425,23 +430,22 @@ export class World {
     return { ok: true, entries, verified: verify, delta };
   }
 
+  // Stores a chronicle entry as structured parameters (no text): the client renders it in the visitor's language.
+  //   found {name} · raid {vs} · voyage · route {from, to, sea} · extinction · freeze {days} · wind {regime} · genesis {n}
   addChronicle(e, sigil, now) {
-    const L = i => this.s.lineages[i]?.name ?? '?';
-    const an = `An ${Math.floor(e.tick / 4)}`;
-    const where = e.x != null ? ROMAN[regionOf(e.x, e.y)] : '';
-    let text = e.text;
-    if (e.kind === 'found') text = `${e.name}, fondée par ${L(e.lin)}.`;
-    else if (e.kind === 'raid') text = `${L(e.lin)} razzie ${L(e.vs)}, ${where}.`;
-    else if (e.kind === 'voyage') text = `${L(e.lin)} longe la côte, ${where}.`;
-    else if (e.kind === 'route') text = `${e.sea ? 'Voie maritime' : 'Route'} de ${e.from} à ${e.to}.`;
-    else if (e.kind === 'extinction') text = `La lignée ${L(e.lin)} s'éteint.`;
-    const entry = { t: now, tick: e.tick, kind: e.kind, lin: e.lin ?? null, x: e.x ?? null, y: e.y ?? null, an, text, sigil };
+    const p = {};
+    if (e.kind === 'found') p.name = e.name;
+    else if (e.kind === 'raid') p.vs = e.vs;
+    else if (e.kind === 'route') { p.from = e.from; p.to = e.to; p.sea = e.sea ? 1 : 0; }
+    else if (e.kind === 'freeze') p.days = e.days;
+    else if (e.kind === 'wind') p.regime = e.regime;
+    const entry = { t: now, tick: e.tick, kind: e.kind, lin: e.lin ?? null, x: e.x ?? null, y: e.y ?? null, p, sigil };
     this.s.chronicle.push(entry);
     if (this.s.chronicle.length > 400) this.s.chronicle.splice(0, this.s.chronicle.length - 400);
     return entry;
   }
 
-  // instantané compact (format fil) ; le client le dépaquette avec unpackSnapshot
+  // compact snapshot (wire format); the client unpacks it with unpackSnapshot
   snapshot(online = 1) {
     const s = this.s;
     return {

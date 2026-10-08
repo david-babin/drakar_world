@@ -1,7 +1,7 @@
-// server.js — drakar.tech · un monde, des visiteurs qui le calculent.
-// Node ≥ 22 (node:sqlite et WebSocket client intégrés), aucune dépendance.
+// server.js — drakar.tech · one world, computed by its visitors.
+// Node ≥ 22 (built-in node:sqlite and WebSocket client), no dependencies.
 //   node --env-file-if-exists=.env server.js     → http://localhost:8787
-//   .env : FINNHUB_KEY=…  (optionnel ; sinon sources sans clé, puis flux synthétique)
+//   .env: FINNHUB_KEY=…  (optional; otherwise keyless sources, then a synthetic feed)
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -16,13 +16,21 @@ import { attachWebSocket } from './ws-mini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +(process.env.PORT || 8787);
-const DB = process.env.DB || path.join(__dirname, 'monde.db');
+const DB = process.env.DB || path.join(__dirname, 'world.db');
 const SEED = +(process.env.SEED || 20261007);
-const VERIFY_EVERY = 7;                       // 1 unité sur 7 est recalculée côté serveur
+const VERIFY_EVERY = 7;                       // 1 unit in 7 is recomputed server-side
 const SNAPSHOT_MS = 3600_000;
 
-// ---------- persistance ----------
+// ---------- persistence ----------
 fs.mkdirSync(path.dirname(DB), { recursive: true });
+// the database used to be called monde.db: adopt it (and its WAL files) if it sits next to the expected path
+{
+  const legacy = path.join(path.dirname(DB), 'monde.db');
+  if (!fs.existsSync(DB) && fs.existsSync(legacy)) {
+    for (const ext of ['', '-wal', '-shm']) if (fs.existsSync(legacy + ext)) fs.renameSync(legacy + ext, DB + ext);
+    console.log(`database: ${legacy} → ${DB}`);
+  }
+}
 const db = new DatabaseSync(DB);
 db.exec(`
   PRAGMA journal_mode = WAL;
@@ -30,10 +38,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, taken_at INTEGER NOT NULL, tick INTEGER NOT NULL, state TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS units (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, region INTEGER NOT NULL, tick INTEGER NOT NULL, sigil TEXT NOT NULL, hash TEXT NOT NULL, verified INTEGER NOT NULL, ok INTEGER NOT NULL, ms INTEGER, climate REAL);
 `);
-const TERRE = loadTerrain(fs.readFileSync(path.join(__dirname, 'public', 'terre.bin')));
+const TERRAIN = loadTerrain(fs.readFileSync(path.join(__dirname, 'public', 'terrain.bin')));
 const row = db.prepare('SELECT state FROM world WHERE id = 1').get();
-const world = row ? new World(JSON.parse(row.state), TERRE) : World.create(SEED, TERRE);
-if (!row) console.log(`Monde créé — graine ${SEED}`);
+const world = row ? new World(JSON.parse(row.state), TERRAIN) : World.create(SEED, TERRAIN);
+if (!row) console.log(`world created — seed ${SEED}`);
 const qSave = db.prepare('INSERT INTO world (id, state, saved_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at');
 const qSnap = db.prepare('INSERT INTO snapshots (taken_at, tick, state) VALUES (?, ?, ?)');
 const qUnit = db.prepare('INSERT INTO units (at, region, tick, sigil, hash, verified, ok, ms, climate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -48,17 +56,20 @@ function save(force = false) {
 setInterval(save, 5000).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { save(true); market.stop(); db.close(); process.exit(0); });
 
-// ---------- HTTP (statique + API de lecture) ----------
-const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.bin': 'application/octet-stream' };
+// ---------- HTTP (static files + read API) ----------
+const MIME = { '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.bin': 'application/octet-stream' };
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
 
-// Le statique est lu une fois, précompressé en brotli et gzip (zlib intégré), servi avec ETag → 304.
-// Le png est déjà compressé ; tout le reste (html, js, svg, manifeste, et surtout les .bin) y gagne 2 à 10×.
+// Static files are read once, precompressed with brotli and gzip (built-in zlib), served with ETag → 304.
+// PNG is already compressed; everything else (html, js, svg, manifest, and above all the .bin files) gains 2 to 10×.
 const PUBLIC = path.join(__dirname, 'public');
 const statics = new Map();
-// Données Terre servies par URL versionnée (?v=empreinte) : cache « immutable » d'un an, et un fichier modifié
-// change d'URL — un vieux cache ne peut plus jamais être lu par un code récent. L'index reçoit la table des empreintes.
-const VERSIONED = ['terre.bin', 'terres.bin', 'cotes.bin', 'niveaux.bin', 'fond.png'];
+// Earth data is served under versioned URLs (?v=fingerprint) with a one-year immutable cache: a changed file
+// changes URL, so an old cache can never be read by newer code. The index receives the fingerprint table.
+const VERSIONED = ['terrain.bin', 'land.bin', 'coasts.bin', 'contours.bin', 'base.png'];
+// UI strings, one file per language, injected into the index: no extra request, no flash of the wrong language
+const LOCALES_DIR = path.join(__dirname, 'locales');
+const locales = () => Object.fromEntries(fs.readdirSync(LOCALES_DIR).filter(f => f.endsWith('.json')).map(f => [path.basename(f, '.json'), JSON.parse(fs.readFileSync(path.join(LOCALES_DIR, f), 'utf8'))]));
 function loadStatic(rel) {
   const file = path.join(PUBLIC, rel);
   if (!file.startsWith(PUBLIC + path.sep) && file !== PUBLIC) return null;
@@ -67,11 +78,11 @@ function loadStatic(rel) {
   const ext = path.extname(file), compressible = ext !== '.png' && ext !== '.woff2';
   if (rel === 'index.html') {
     const assets = Object.fromEntries(VERSIONED.map(n => [n, statics.get(n)?.etag.slice(1, -1) || '']));
-    raw = Buffer.from(raw.toString('utf8').replace('/*__ASSETS__*/null', JSON.stringify(assets)));
+    raw = Buffer.from(raw.toString('utf8').replace('/*__ASSETS__*/null', JSON.stringify(assets)).replace('/*__LOCALES__*/null', JSON.stringify(locales())));
   }
   const entry = {
     raw, type: MIME[ext] || 'application/octet-stream', etag: '"' + createHash('sha1').update(raw).digest('base64url').slice(0, 16) + '"',
-    cache: ['.png', '.svg', '.woff2'].includes(ext) && !VERSIONED.includes(rel) ? 'public, max-age=86400' : 'no-cache',   // sans version : toujours revalidé (304 bon marché)
+    cache: ['.png', '.svg', '.woff2'].includes(ext) && !VERSIONED.includes(rel) ? 'public, max-age=86400' : 'no-cache',   // unversioned: always revalidated (cheap 304)
     br: compressible ? zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: raw.length } }) : null,
     gz: compressible ? zlib.gzipSync(raw, { level: 9 }) : null,
   };
@@ -79,9 +90,12 @@ function loadStatic(rel) {
   return entry;
 }
 for (const rel of fs.readdirSync(PUBLIC, { recursive: true })) { const f = path.join(PUBLIC, rel); if (fs.statSync(f).isFile() && rel !== 'index.html') loadStatic(rel); }
-loadStatic('index.html');            // en dernier : il embarque les empreintes
-console.log(`statique : ${statics.size} fichiers, ${[...statics.values()].reduce((n, e) => n + e.raw.length, 0) >> 10} ko bruts, ${[...statics.values()].reduce((n, e) => n + (e.br || e.raw).length, 0) >> 10} ko en brotli`);
-if (process.env.NODE_ENV !== 'production') fs.watch(PUBLIC, { recursive: true }, (_, name) => { if (name) { statics.delete(name); try { loadStatic(name); if (VERSIONED.includes(name)) loadStatic('index.html'); } catch {} } });   // dev : rechargement à chaud
+loadStatic('index.html');            // last: it embeds the fingerprints
+console.log(`static: ${statics.size} files, ${[...statics.values()].reduce((n, e) => n + e.raw.length, 0) >> 10} kB raw, ${[...statics.values()].reduce((n, e) => n + (e.br || e.raw).length, 0) >> 10} kB brotli`);
+if (process.env.NODE_ENV !== 'production') {        // dev: hot reload
+  fs.watch(PUBLIC, { recursive: true }, (_, name) => { if (name) { statics.delete(name); try { loadStatic(name); if (VERSIONED.includes(name)) loadStatic('index.html'); } catch {} } });
+  fs.watch(LOCALES_DIR, () => { try { loadStatic('index.html'); } catch {} });
+}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -109,9 +123,9 @@ const server = http.createServer((req, res) => {
   } catch (e) { console.error(e); json(res, 500, { error: String(e.message || e) }); }
 });
 
-// ---------- WebSocket : visiteurs ----------
-// serveur → client : hello, world, chronicle, market, online, lease, progress, release, unit, ack, nack
-// client → serveur : hello {sigil}, lease, result {result, hash, ms, verify}, progress {region, step, agents}
+// ---------- WebSocket: visitors ----------
+// server → client: hello, world, delta, chronicle, market, online, tick, lease, progress, release, unit, ack, nack
+// client → server: hello {sigil}, lease, result {result, hash, ms, verify}, progress {region, step, agents, gone, full}, resync
 const peers = new Map();                      // ws → { sigil, region, step, at }
 let unitCounter = 0;
 const sigilOf = (ws, given) => {
@@ -137,7 +151,7 @@ const hub = attachWebSocket(server, '/ws', ws => {
       else if (m.t === 'lease') {
         if (!me.sigil) return;
         const unit = world.lease(me.sigil);
-        if (!unit) return ws.send({ t: 'nack', reason: 'aucune région libre' });
+        if (!unit) return ws.send({ t: 'nack', reason: 'no free region' });
         dirty = true; me.region = unit.region; me.step = 0; me.at = Date.now();
         ws.send({ t: 'unit', unit: packUnit(unit), verify: (++unitCounter % VERIFY_EVERY) === 0 });
         hub.broadcast({ t: 'lease', region: unit.region, sigil: me.sigil }, ws);
@@ -153,7 +167,7 @@ const hub = attachWebSocket(server, '/ws', ws => {
       else if (m.t === 'result') {
         if (!me.sigil || !m.result) return;
         const t0 = Date.now();
-        let result; try { result = unpackResult(m.result); } catch { return ws.send({ t: 'nack', reason: 'résultat illisible' }); }
+        let result; try { result = unpackResult(m.result); } catch { return ws.send({ t: 'nack', reason: 'unreadable result' }); }
         const r = world.integrate(result, me.sigil, { verify: !!m.verify });
         qUnit.run(t0, m.result.region ?? -1, m.result.tick ?? -1, me.sigil, String(m.hash || '').slice(0, 16), r.verified ? 1 : 0, r.ok ? 1 : 0, m.ms | 0, world.climate);
         const region = me.region; me.region = null; me.step = 0;
@@ -161,7 +175,7 @@ const hub = attachWebSocket(server, '/ws', ws => {
         if (!r.ok) return ws.send({ t: 'nack', reason: r.reason });
         dirty = true;
         ws.send({ t: 'ack', verified: r.verified, tick: world.tick, serverMs: Date.now() - t0 });
-        hub.broadcast({ t: 'delta', ...r.delta });                       // le delta seul, à tous (émetteur compris)
+        hub.broadcast({ t: 'delta', ...r.delta });                       // only the delta, to everyone (sender included)
         for (const e of r.entries) hub.broadcast({ t: 'chronicle', entry: packEntry(e) });
       }
     } catch (e) { console.error('ws', e); }
@@ -174,11 +188,11 @@ const hub = attachWebSocket(server, '/ws', ws => {
   });
 });
 
-// battement : les clients s'en servent pour détecter une connexion morte (veille, réseau coupé)
+// heartbeat: clients use it to detect a dead connection (sleep, network loss)
 setInterval(() => hub.broadcast({ t: 'tick', online: hub.size, t: Date.now() }), 20_000).unref();
 
-// ---------- marché → climat ----------
-const regime = c => (c > 0.25 ? 'abondance' : c < -0.25 ? 'disette' : 'ordinaire');
+// ---------- market → climate ----------
+const regime = c => (c > 0.25 ? 'plenty' : c < -0.25 ? 'scarcity' : 'ordinary');
 const market = createMarket(db);
 if (market.current) world.setMarket(market.current);
 let lastRegime = regime(world.climate);
@@ -187,11 +201,10 @@ market.onChange(m => {
   const r = regime(world.climate);
   if (r !== lastRegime) {
     lastRegime = r;
-    const text = r === 'abondance' ? 'Les vents tournent : saison d\'abondance.' : r === 'disette' ? 'Les vents tournent : disette.' : 'Les vents retombent.';
-    const e = world.addChronicle({ kind: 'wind', tick: world.tick, text }, '—', Date.now());
+    const e = world.addChronicle({ kind: 'wind', tick: world.tick, regime: r }, '—', Date.now());
     dirty = true; hub.broadcast({ t: 'chronicle', entry: packEntry(e) });
   }
   hub.broadcast({ t: 'market', market: m, climate: world.climate });
 });
 
-server.listen(PORT, () => console.log(`drakar.tech → http://localhost:${PORT}  (an ${world.year}, ${world.s.agents.length} groupes, ${world.s.settlements.length} comptoirs, ${world.s.routes.length} routes)${market.hasKey ? ' · Finnhub ' + market.symbol : ' · sans clé marché'}`));
+server.listen(PORT, () => console.log(`drakar.tech → http://localhost:${PORT}  (year ${world.year}, ${world.s.agents.length} groups, ${world.s.settlements.length} settlements, ${world.s.routes.length} routes)${market.hasKey ? ' · Finnhub ' + market.symbol : ' · no market key'}`));

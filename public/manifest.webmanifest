@@ -1,16 +1,26 @@
 {
   "name": "drakar",
   "short_name": "drakar",
-  "description": "Un monde. Il n'avance que si quelqu'un le regarde.",
+  "description": "One world. It only moves forward while someone is watching.",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
   "orientation": "any",
   "background_color": "#07090c",
   "theme_color": "#07090c",
-  "lang": "fr",
+  "lang": "en",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// build-icons.mjs — génère favicon et icônes d'app depuis public/icons/icon.svg (Playwright, dev seulement).
+// build-icons.mjs — renders the favicon and app icons from public/icons/icon.svg (Playwright, dev only).
 //   node tools/build-icons.mjs
 import fs from 'node:fs';
 import path from 'node:path';

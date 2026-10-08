@@ -1,5 +1,7 @@
-monde.db
-monde.db-*
+world.db
+world.db-*
+world-dev.db*
+monde.db*
 data/
 node_modules/
 *.log

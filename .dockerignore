@@ -2,8 +2,9 @@
 .vscode
 node_modules
 .env
-monde.db
-monde.db-*
+world.db
+world.db-*
+world-dev.db*
 data
 demo.html
 build-demo.mjs

@@ -1,29 +1,29 @@
 #!/usr/bin/env node
-// build-terre.mjs — fabrique les données Terre de drakar.tech, une fois, hors runtime.
+// build-earth.mjs — builds drakar.tech's Earth data, once, outside the runtime.
 //
-// Entrées (non versionnées) :
-//   --etopo  etopo1.jpg      ETOPO1 (NOAA) teinté par altitude, 5400×2700   — paquet PyPI `basemap-data` (ou toute image ETOPO)
-//   --bmng   bmng.jpg        Blue Marble (NASA), même paquet                 — humidité (indice de végétation)
-//   --land   land-50m.json   Natural Earth 1:50m, TopoJSON                   — paquet npm `world-atlas`
+// Inputs (not versioned):
+//   --etopo  etopo1.jpg      ETOPO1 (NOAA) tinted by elevation, 5400×2700   — PyPI package `basemap-data` (or any ETOPO image)
+//   --bmng   bmng.jpg        Blue Marble (NASA), same package                — moisture (vegetation index)
+//   --land   land-50m.json   Natural Earth 1:50m, TopoJSON                   — npm package `world-atlas`
 //
-// Sorties (versionnées, dans public/) :
-//   terre.bin    grille de simulation 384×192 : type (0 mer, 1 haut-fond, 2 plaine, 3 collines, 4 montagne, 5 glace) + fertilité
-//   fond.png     768×384 niveaux de gris : type*32 + niveau d'altitude*2    (classes de relief et ombrage)
-//   terres.bin   anneaux Natural Earth déroulés (lon jusqu'à 540°), delta zigzag-varint, 1/60°   (remplissage, parité de stencil)
-//   cotes.bin    arcs Natural Earth, delta zigzag-varint, 1/100°                             (côtes vectorielles)
-//   niveaux.bin  courbes de niveau 500/1000/2000/3000/4000 m, delta zigzag-varint, 1/100°  (relief vectoriel)
+// Outputs (versioned, in public/):
+//   terrain.bin   384×192 simulation grid: type (0 sea, 1 shelf, 2 plain, 3 hills, 4 mountain, 5 ice) + fertility
+//   base.png      768×384 greyscale: type*32 + elevation level*2                (relief classes and shading)
+//   land.bin      Natural Earth rings, unwrapped (lon up to 540°), zigzag-varint deltas, 1/60°   (fill, stencil parity)
+//   coasts.bin    Natural Earth arcs, zigzag-varint deltas, 1/100°                              (vector coasts)
+//   contours.bin  contour lines 500/1000/2000/3000/4000 m, zigzag-varint deltas, 1/100°         (vector relief)
 //
-//   npm run build:terre -- --etopo … --bmng … --land …          (dépendances de dev : jpeg-js, pngjs, d3-contour)
+//   npm run build:earth -- --etopo … --bmng … --land …          (dev dependencies: jpeg-js, pngjs, d3-contour)
 
 import fs from 'node:fs';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import { contours as d3contours } from 'd3-contour';
 
-const FW = 1536, FH = 768;          // fond + contours
-const SW = 384, SH = 192;           // grille de simulation (FW/SW = 4)
+const FW = 1536, FH = 768;          // base + contours
+const SW = 384, SH = 192;           // simulation grid (FW/SW = 4)
 const LEVELS = [500, 1000, 2000, 3000, 4000];
-// rampe ETOPO1 (GMT), mètres → couleur
+// ETOPO1 colour ramp (GMT), metres → colour
 const RAMP = [[0, [51, 102, 0]], [100, [51, 204, 102]], [200, [187, 228, 146]], [500, [255, 220, 185]], [1000, [243, 202, 137]],
   [1500, [230, 184, 88]], [2000, [217, 166, 39]], [2500, [168, 154, 31]], [3000, [164, 144, 25]], [3500, [162, 134, 19]],
   [4000, [159, 123, 13]], [4500, [156, 113, 7]], [5000, [153, 102, 0]], [5500, [162, 89, 89]], [6000, [178, 118, 118]],
@@ -31,11 +31,11 @@ const RAMP = [[0, [51, 102, 0]], [100, [51, 204, 102]], [200, [187, 228, 146]], 
 
 const args = Object.fromEntries(process.argv.slice(2).join(' ').split('--').filter(Boolean).map(s => { const [k, ...v] = s.trim().split(/\s+/); return [k, v.join(' ')]; }));
 const OUT = args.out || 'public';
-for (const k of ['etopo', 'bmng', 'land']) if (!args[k]) { console.error('usage : build-terre.mjs --etopo etopo1.jpg --bmng bmng.jpg --land land-50m.json [--out public]'); process.exit(1); }
+for (const k of ['etopo', 'bmng', 'land']) if (!args[k]) { console.error('usage: build-earth.mjs --etopo etopo1.jpg --bmng bmng.jpg --land land-50m.json [--out public]'); process.exit(1); }
 const log = (...a) => console.error(...a);
 
 // ---------- images ----------
-// décode un JPEG et le réduit à FW×FH par moyenne de boîte → Float32Array RGB
+// decodes a JPEG and box-averages it down to FW×FH → Float32Array RGB
 function loadRGB(path) {
   const { width, height, data } = jpeg.decode(fs.readFileSync(path), { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 1024 });
   const acc = new Float32Array(FW * FH * 3), cnt = new Uint32Array(FW * FH);
@@ -68,7 +68,7 @@ function elevationFromEtopo(path) {
     water[k] = (b > r + 15 && b > g - 10) ? 1 : 0;
     shoal[k] = (water[k] && (r + g + b) / 3 > 170) ? 1 : 0;
     white[k] = (mn > 195 && mx - mn < 25) ? 1 : 0;
-    const cr = r / mx, cg = g / mx, cb = b / mx;          // chrominance : insensible à l'ombrage
+    const cr = r / mx, cg = g / mx, cb = b / mx;          // chrominance: insensitive to hillshading
     let best = 1e9, bm = 0;
     for (const [m, sr, sg, sb] of stops) { const d = (cr - sr) ** 2 + (cg - sg) ** 2 + (cb - sb) ** 2; if (d < best) { best = d; bm = m; } }
     meters[k] = bm;
@@ -80,7 +80,7 @@ function moistureFromBmng(path) {
   const rgb = loadRGB(path), m = new Float32Array(FW * FH);
   for (let k = 0; k < FW * FH; k++) {
     const r = rgb[k * 3], g = rgb[k * 3 + 1];
-    const ndvi = (g - r) / (g + r + 1);                   // vert = végétation, tan = aride
+    const ndvi = (g - r) / (g + r + 1);                   // green = vegetation, tan = arid
     m[k] = Math.max(0, Math.min(1, 0.45 + 2.2 * ndvi));
   }
   return gaussian(m, FW, FH, 2);
@@ -96,9 +96,9 @@ function ringPoints(ring, arcs) {
   for (const i of ring) { const a = i < 0 ? arcs[~i].slice().reverse() : arcs[i]; pts.push(...(pts.length ? a.slice(1) : a)); }
   return pts;
 }
-// remplissage scanline pair-impair d'un anneau en degrés. Les anneaux qui touchent l'antiméridien sont
-// déroulés (longitudes continues) et peints sur une largeur double, repliée ensuite : sinon ils se
-// refermeraient « à travers » toute la carte et peindraient une bande entière.
+// even-odd scanline fill of a ring in degrees. Rings touching the antimeridian are unwrapped (continuous
+// longitudes) and painted on a double width that is folded back afterwards: otherwise they would close
+// "across" the whole map and paint an entire band.
 function unwrap(ring) {
   const out = [ring[0].slice()];
   for (let i = 1; i < ring.length; i++) {
@@ -135,8 +135,8 @@ function landMask(path) {
   return { mask, arcs, rings };
 }
 
-// ---------- lignes ----------
-function simplify(pts, tol) {               // Douglas-Peucker itératif
+// ---------- lines ----------
+function simplify(pts, tol) {               // iterative Douglas-Peucker
   if (pts.length < 3) return pts;
   const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
   const stack = [[0, pts.length - 1]];
@@ -154,14 +154,14 @@ function simplify(pts, tol) {               // Douglas-Peucker itératif
   }
   return pts.filter((_, i) => keep[i]);
 }
-function splitAntimeridian(pts) {           // une ligne qui saute de +180 à −180 devient deux lignes
+function splitAntimeridian(pts) {           // a line jumping from +180 to −180 becomes two lines
   const out = []; let cur = [pts[0]];
   for (let i = 1; i < pts.length; i++) { if (Math.abs(pts[i][0] - cur[cur.length - 1][0]) > 90) { out.push(cur); cur = [pts[i]]; } else cur.push(pts[i]); }
   out.push(cur);
   return out.filter(c => c.length >= 2);
 }
-// Encodage delta zigzag-varint : chaque point est relatif au précédent (en unités de 1/scale degré),
-// 1 à 2 octets par coordonnée au lieu de 2 fixes, et brotli y gagne encore. Même format pour lignes et anneaux.
+// Zigzag-varint delta encoding: each point is relative to the previous one (in units of 1/scale degree),
+// 1 to 2 bytes per coordinate instead of a fixed 2, and brotli gains more on top. Same format for lines and rings.
 class VarWriter {
   constructor() { this.parts = []; this.n = 0; }
   u(v) { for (;;) { if (v < 0x80) { this.parts.push(v); return; } this.parts.push((v & 0x7f) | 0x80); v >>>= 7; } }
@@ -183,16 +183,16 @@ function packLines(lines, withLevel, scale = 100) {
 }
 
 // ---------- main ----------
-log('altitude…'); const { meters: m0, shoal, white } = elevationFromEtopo(args.etopo);
-log('humidité…'); const moist = moistureFromBmng(args.bmng);
-log('côtes…'); const { mask: land, arcs, rings } = landMask(args.land);
+log('elevation…'); const { meters: m0, shoal, white } = elevationFromEtopo(args.etopo);
+log('moisture…'); const moist = moistureFromBmng(args.bmng);
+log('coasts…'); const { mask: land, arcs, rings } = landMask(args.land);
 
 const latAt = y => 90 - (y + 0.5) / FH * 180;
 const ice = new Uint8Array(FW * FH), meters = new Float32Array(FW * FH);
 for (let y = 0; y < FH; y++) { const lat = latAt(y); for (let x = 0; x < FW; x++) { const k = y * FW + x; ice[k] = land[k] && (lat < -60 || (white[k] && Math.abs(lat) > 58)) ? 1 : 0; meters[k] = land[k] && !ice[k] ? m0[k] : 0; } }
 
-// classes → fond.png, en demi-résolution (768×384) : le littoral vient du masque vectoriel, le fond ne porte
-// que plaine / collines / montagne / glace / plateau continental et 16 niveaux d'altitude pour l'ombrage
+// classes → base.png at half resolution (768×384): the coastline comes from the vector mask, the base only carries
+// plain / hills / mountain / ice / continental shelf and 16 elevation levels for shading
 const PW = FW / 2, PH = FH / 2;
 const png = new PNG({ width: PW, height: PH, colorType: 0, inputColorType: 0, bitDepth: 8 });
 for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
@@ -205,9 +205,9 @@ for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
   let cls = 0, best = -1; for (let c = 0; c < 6; c++) if (cnt[c] > best) { best = cnt[c]; cls = c; }
   png.data[y * PW + x] = cls * 32 + Math.round(lv / 4) * 2;
 }
-fs.writeFileSync(`${OUT}/fond.png`, PNG.sync.write(png, { colorType: 0, inputColorType: 0, bitDepth: 8 }));
+fs.writeFileSync(`${OUT}/base.png`, PNG.sync.write(png, { colorType: 0, inputColorType: 0, bitDepth: 8 }));
 
-// grille de simulation : agrégation 4×4
+// simulation grid: 4×4 aggregation
 const K = FW / SW, typ = new Uint8Array(SW * SH), fert = new Uint8Array(SW * SH);
 const cnt = [0, 0, 0, 0, 0, 0];
 for (let y = 0; y < SH; y++) {
@@ -217,7 +217,7 @@ for (let y = 0; y < SH; y++) {
     let nl = 0, ni = 0, ns = 0, se = 0, sm = 0;
     for (let dy = 0; dy < K; dy++) for (let dx = 0; dx < K; dx++) { const k = (y * K + dy) * FW + x * K + dx; nl += land[k]; ni += ice[k]; ns += shoal[k]; se += meters[k]; sm += moist[k]; }
     const N = K * K, i = y * SW + x;
-    if (nl < N * 0.4) typ[i] = ns > N / 2 ? 1 : 0;        // une cellule à 40 % de terre est une côte
+    if (nl < N * 0.4) typ[i] = ns > N / 2 ? 1 : 0;        // a cell 40 % land is a coast
     else if (ni > N / 2) typ[i] = 5;
     else {
       const e = se / N, m = sm / N, t = e < 600 ? 2 : e < 2000 ? 3 : 4;
@@ -229,37 +229,37 @@ for (let y = 0; y < SH; y++) {
   }
 }
 const head = Buffer.alloc(8); head.write('TERR', 0, 'ascii'); head.writeUInt16LE(SW, 4); head.writeUInt16LE(SH, 6);
-fs.writeFileSync(`${OUT}/terre.bin`, Buffer.concat([head, Buffer.from(typ), Buffer.from(fert)]));
+fs.writeFileSync(`${OUT}/terrain.bin`, Buffer.concat([head, Buffer.from(typ), Buffer.from(fert)]));
 
-// côtes : les arcs Natural Earth (chaque frontière une seule fois)
-const cotes = arcs.map(a => simplify(a, 0.015)).filter(a => a.length >= 2).map(a => [0, a]);
-const [cb, cn] = packLines(cotes, false); fs.writeFileSync(`${OUT}/cotes.bin`, cb);
-log(`cotes.bin : ${cotes.length} arcs, ${cn} points, ${cb.length >> 10} ko`);
+// coasts: the Natural Earth arcs (each boundary once)
+const coasts = arcs.map(a => simplify(a, 0.015)).filter(a => a.length >= 2).map(a => [0, a]);
+const [cb, cn] = packLines(coasts, false); fs.writeFileSync(`${OUT}/coasts.bin`, cb);
+log(`coasts.bin: ${coasts.length} arcs, ${cn} points, ${cb.length >> 10} kB`);
 
-// terres : anneaux déroulés pour le remplissage par parité (le client les dessine à 0 et −360°)
+// land: unwrapped rings for parity fill (the client draws them at 0 and −360°)
 {
   const rs = rings.map(r => simplify(r, 0.015)).filter(r => r.length >= 3);
   const w = new VarWriter(); let n = 0; w.u(rs.length);
   for (const r of rs) { w.u(r.length); let px = 0, py = 0; for (const [x, y] of r) { const qx = Math.round(x * 60), qy = Math.round(y * 60); w.s(qx - px); w.s(qy - py); px = qx; py = qy; n++; } }
-  const buf = w.bytes(); fs.writeFileSync(`${OUT}/terres.bin`, buf);
-  log(`terres.bin : ${rs.length} anneaux, ${n} points, ${buf.length >> 10} ko`);
+  const buf = w.bytes(); fs.writeFileSync(`${OUT}/land.bin`, buf);
+  log(`land.bin: ${rs.length} rings, ${n} points, ${buf.length >> 10} kB`);
 }
 
-// courbes de niveau (marching squares) — anneaux en coordonnées de grille → degrés
+// contour lines (marching squares) — rings in grid coordinates → degrees
 const gen = d3contours().size([FW, FH]).smooth(true);
 const lines = [];
 const toDeg = ([gx, gy]) => [gx / FW * 360 - 180, 90 - gy / FH * 180];
 LEVELS.forEach((lv, li) => {
   for (const poly of gen.contour(meters, lv).coordinates) for (const ring of poly) {
     if (ring.length < 18) continue;
-    // on retire les tronçons qui longent le bord de la grille (antiméridien)
+    // drop the stretches that run along the grid edge (antimeridian)
     const pts = ring.map(toDeg).filter(([lon]) => Math.abs(lon) < 179.9);
     if (pts.length < 18) continue;
     const s = simplify(pts, 0.07);
     if (s.length >= 4) lines.push([li, s]);
   }
 });
-const [nb, nn] = packLines(lines, true); fs.writeFileSync(`${OUT}/niveaux.bin`, nb);
-log(`niveaux.bin : ${lines.length} courbes, ${nn} points, ${nb.length >> 10} ko`);
+const [nb, nn] = packLines(lines, true); fs.writeFileSync(`${OUT}/contours.bin`, nb);
+log(`contours.bin: ${lines.length} lines, ${nn} points, ${nb.length >> 10} kB`);
 const tot = SW * SH;
-log(`terre.bin : mer ${(100 * (cnt[0] + cnt[1]) / tot).toFixed(1)} % · terre ${(100 * (cnt[2] + cnt[3] + cnt[4]) / tot).toFixed(1)} % (plaine ${cnt[2]}, collines ${cnt[3]}, montagne ${cnt[4]}) · glace ${(100 * cnt[5] / tot).toFixed(1)} %`);
+log(`terrain.bin: sea ${(100 * (cnt[0] + cnt[1]) / tot).toFixed(1)} % · land ${(100 * (cnt[2] + cnt[3] + cnt[4]) / tot).toFixed(1)} % (plain ${cnt[2]}, hills ${cnt[3]}, mountain ${cnt[4]}) · ice ${(100 * cnt[5] / tot).toFixed(1)} %`);

@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "drakar.tech · serveur",
+      "name": "drakar.tech · server",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/server.js",
@@ -18,19 +18,19 @@
       }
     },
     {
-      "name": "drakar.tech · serveur (monde neuf)",
+      "name": "drakar.tech · server (fresh world)",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/server.js",
       "cwd": "${workspaceFolder}",
-      "env": { "PORT": "8787", "DB": "${workspaceFolder}/monde-dev.db" },
+      "env": { "PORT": "8787", "DB": "${workspaceFolder}/world-dev.db" },
       "runtimeArgs": ["--no-warnings", "--env-file-if-exists=.env"],
       "console": "integratedTerminal",
-      "preLaunchTask": "drakar: effacer monde-dev.db",
+      "preLaunchTask": "drakar: delete world-dev.db",
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "drakar.tech · test simulation",
+      "name": "drakar.tech · simulation test",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/test/sim.test.mjs",

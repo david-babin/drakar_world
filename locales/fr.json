@@ -1,0 +1,37 @@
+{
+  "name": "Français",
+  "numberLocale": "fr-FR",
+  "meta": { "description": "Un monde. Il n'avance que si quelqu'un le regarde." },
+  "year": "An {n}",
+  "yearLower": "an {n}",
+  "index": "indice",
+  "climate": "climat",
+  "live": "direct",
+  "season": { "plenty": "abondance", "scarcity": "disette", "ordinary": "saison ordinaire" },
+  "status": {
+    "computing": "calcul · région",
+    "sync": "synchronisation",
+    "connecting": "connexion",
+    "reconnecting": "reconnexion",
+    "demo": "mode démo · monde local"
+  },
+  "whispers": [
+    "Vous êtes le témoin <b>{me}</b>.<br>Ce monde n'existe que parce qu'on le regarde.",
+    "Quand vous partirez, il se figera.<br>Quand vous reviendrez, il aura vieilli.",
+    "Il n'a pas de but.<br>Il n'a que des témoins."
+  ],
+  "machine": { "cpu": "cpu {n}", "mem": "{n} go", "dps": "{n} décisions/s", "region": "région {r}", "online": "{n} en ligne" },
+  "lineages": ["Ambre", "Cendre", "Lichen", "Ocre", "Sel", "Garance", "Indigo", "Cuivre", "Brume", "Safran", "Ardoise", "Bruyère", "Jade", "Rouille", "Écume", "Suie"],
+  "chronicle": {
+    "genesis": "{n} drakkars touchent terre. Le monde commence.",
+    "found": "{name}, fondée par {lin}.",
+    "raid": "{lin} razzie {vs}, {where}.",
+    "voyage": "{lin} longe la côte, {where}.",
+    "route": "Route de {from} à {to}.",
+    "seaRoute": "Voie maritime de {from} à {to}.",
+    "extinction": "La lignée {lin} s'éteint.",
+    "freezeOne": "Gel d'un jour. Aucun témoin.",
+    "freezeMany": "Gel de {days} jours. Aucun témoin.",
+    "wind": { "plenty": "Les vents tournent : saison d'abondance.", "scarcity": "Les vents tournent : disette.", "ordinary": "Les vents retombent." }
+  }
+}

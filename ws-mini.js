@@ -1,11 +1,11 @@
-// ws-mini.js — serveur WebSocket minimal (RFC 6455 + permessage-deflate RFC 7692), texte seulement, sans dépendance.
-// Suffisant pour quelques centaines de visiteurs ; pour des milliers, prendre `ws`.
+// ws-mini.js — minimal WebSocket server (RFC 6455 + permessage-deflate RFC 7692), text only, no dependencies.
+// Enough for a few hundred visitors; for thousands, use `ws`.
 import { createHash } from 'node:crypto';
 import zlib from 'node:zlib';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const MAX_MESSAGE = 4 * 1024 * 1024;
-const DEFLATE_MIN = 192;                      // en dessous, la compression ne gagne rien
+const DEFLATE_MIN = 192;                      // below this, compression gains nothing
 const TAIL = Buffer.from([0, 0, 0xff, 0xff]);
 
 export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } = {}) {
@@ -16,7 +16,7 @@ export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } 
     const key = req.headers['sec-websocket-key'];
     if (url.pathname !== path || !key || !/websocket/i.test(req.headers.upgrade || '')) { socket.destroy(); return; }
     const accept = createHash('sha1').update(key + GUID).digest('base64');
-    // compression par message, sans contexte partagé : chaque message est indépendant (simple, sûr, sans mémoire par client)
+    // per-message compression without context takeover: each message is independent (simple, safe, no per-client memory)
     const deflate = /permessage-deflate/.test(req.headers['sec-websocket-extensions'] || '');
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' + `Sec-WebSocket-Accept: ${accept}\r\n`
       + (deflate ? 'Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n' : '') + '\r\n');
@@ -42,7 +42,7 @@ export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } 
         if (len === 126) { if (buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
         else if (len === 127) { if (buf.length < 10) return; const big = buf.readBigUInt64BE(2); if (big > BigInt(MAX_MESSAGE)) { ws.close(1009); socket.destroy(); return; } len = Number(big); off = 10; }
         if (len > MAX_MESSAGE) { ws.close(1009); socket.destroy(); return; }
-        if (!masked) { ws.close(1002); socket.destroy(); return; }      // un client doit masquer
+        if (!masked) { ws.close(1002); socket.destroy(); return; }      // a client must mask
         if (buf.length < off + 4 + len) return;
         const mask = buf.subarray(off, off + 4), payload = Buffer.allocUnsafe(len);
         for (let i = 0; i < len; i++) payload[i] = buf[off + 4 + i] ^ mask[i & 3];
@@ -57,7 +57,7 @@ export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } 
           if (frag.size > MAX_MESSAGE) { ws.close(1009); socket.destroy(); return; }
           if (fin) {
             let msg = Buffer.concat(frag.parts); const { op: fop, compressed } = frag; frag = null;
-            if (compressed) { try { msg = zlib.inflateRawSync(Buffer.concat([msg, TAIL]), { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: MAX_MESSAGE }); } catch { ws.close(1007); socket.destroy(); return; } }   // flux sans bloc final : Z_SYNC_FLUSH
+            if (compressed) { try { msg = zlib.inflateRawSync(Buffer.concat([msg, TAIL]), { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: MAX_MESSAGE }); } catch { ws.close(1007); socket.destroy(); return; } }   // stream without a final block: Z_SYNC_FLUSH
             if (fop !== 0x2) for (const f of ws.handlers.message) f(msg.toString('utf8'));
           }
         }
@@ -78,7 +78,7 @@ export function attachWebSocket(server, path, onConnection, { pingMs = 25_000 } 
 
   return {
     clients,
-    // une seule compression par diffusion, partagée entre tous les clients qui l'ont négociée
+    // one compression per broadcast, shared by every client that negotiated it
     broadcast(data, except = null) {
       let plain = null, packed = null;
       for (const ws of clients) {
@@ -95,7 +95,7 @@ function encode(data, deflate) {
   const payload = Buffer.from(typeof data === 'string' ? data : JSON.stringify(data));
   if (!deflate || payload.length < DEFLATE_MIN) return frame(1, payload);
   const z = zlib.deflateRawSync(payload, { finishFlush: zlib.constants.Z_SYNC_FLUSH, level: 6 });
-  return frame(1, z.subarray(0, z.length - 4), true);     // on retire le 00 00 ff ff final (RFC 7692 §7.2.1)
+  return frame(1, z.subarray(0, z.length - 4), true);     // strip the trailing 00 00 ff ff (RFC 7692 §7.2.1)
 }
 
 function frame(op, payload, rsv1 = false) {
