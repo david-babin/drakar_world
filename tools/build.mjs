@@ -56,10 +56,18 @@ function ensureEarth() {
 const locales = () => Object.fromEntries(fs.readdirSync(at('src/front/locales')).filter(f => f.endsWith('.json')).sort()
   .map(f => [path.basename(f, '.json'), JSON.parse(fs.readFileSync(at('src/front/locales', f), 'utf8'))]));
 
-async function bundleFront(assets) {
+// the compute engine alone (src/lib/engine.js → global DrakarEngine): loaded by the page and the Android app
+async function bundleEngine() {
+  const r = await esbuild.build({
+    entryPoints: [at('src/lib/engine.js')], bundle: true, minify: true, format: 'iife', globalName: 'DrakarEngine',
+    target: ['es2020'], legalComments: 'none', write: false, logLevel: 'silent',
+  });
+  return r.outputFiles[0].contents;
+}
+async function bundleFront(assets, engineVersion) {
   const r = await esbuild.build({
     entryPoints: [at('src/front/main.js')], bundle: true, minify: true, format: 'iife', target: ['es2020'],
-    define: { __LOCALES__: JSON.stringify(locales()), __ASSETS__: JSON.stringify(assets) },
+    define: { __LOCALES__: JSON.stringify(locales()), __ASSETS__: JSON.stringify(assets), __ENGINE__: JSON.stringify(engineVersion) },
     legalComments: 'none', write: false, logLevel: 'silent',
   });
   return r.outputFiles[0].contents;
@@ -95,17 +103,19 @@ async function buildSite() {
   for (const f of EARTH) put(path.join(PUBLIC, f), fs.readFileSync(at('assets/earth', f)));
   copyDir(at('src/front/static'), PUBLIC);
   const assets = Object.fromEntries(EARTH.map(f => [f, fingerprint(fs.readFileSync(at('assets/earth', f)))]));
-  const app = await bundleFront(assets);
+  const engine = await bundleEngine(), engineVersion = fingerprint(Buffer.from(engine));
+  put(path.join(PUBLIC, 'engine.js'), engine);
+  const app = await bundleFront(assets, engineVersion);
   put(path.join(PUBLIC, 'app.js'), app);
-  const html = await page(`<script src="/app.js?v=${fingerprint(Buffer.from(app))}" defer></script>`);
+  const html = await page(`<script src="/engine.js?v=${engineVersion}" defer></script><script src="/app.js?v=${fingerprint(Buffer.from(app))}" defer></script>`);
   put(path.join(PUBLIC, 'index.html'), html);
-  return { app, html };
+  return { app, engine, html };
 }
 
-async function buildDemo(app) {
+async function buildDemo(app, engine) {
   const data = Object.fromEntries(EARTH.map(f => [f, fs.readFileSync(at('assets/earth', f)).toString('base64')]));
   const safe = s => s.replace(/<\/script/gi, '<\\/script');
-  const html = (await page(`<script>window.DRAKAR_DATA=${JSON.stringify(data)}</script><script>${safe(Buffer.from(app).toString('utf8'))}</script>`))
+  const html = (await page(`<script>window.DRAKAR_DATA=${JSON.stringify(data)}</script><script>${safe(Buffer.from(engine).toString('utf8'))}</script><script>${safe(Buffer.from(app).toString('utf8'))}</script>`))
     .replace('<title>drakar</title>', '<title>drakar · demo</title>');
   fs.writeFileSync(at('demo.html'), html);
   return html;
@@ -126,9 +136,9 @@ async function buildAll({ clean = false } = {}) {
   const t0 = Date.now();
   if (clean) { fs.rmSync(PUBLIC, { recursive: true, force: true }); fs.rmSync(BIN, { recursive: true, force: true }); }
   ensureEarth();
-  const [{ app, html }, back] = await Promise.all([buildSite(), buildBack()]);
-  let line = `${VERSION} · public/app.js ${kB(app.length)} · index.html ${kB(html.length)} · bin/backend.js ${kB(back)}`;
-  if (args.has('--demo')) line += ` · demo.html ${kB((await buildDemo(app)).length)}`;
+  const [{ app, engine, html }, back] = await Promise.all([buildSite(), buildBack()]);
+  let line = `${VERSION} · public/engine.js ${kB(engine.length)} · app.js ${kB(app.length)} · index.html ${kB(html.length)} · bin/backend.js ${kB(back)}`;
+  if (args.has('--demo')) line += ` · demo.html ${kB((await buildDemo(app, engine)).length)}`;
   log(`${line} · ${Date.now() - t0} ms`);
 }
 

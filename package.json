@@ -13,7 +13,7 @@
     "serve": "node --no-warnings --env-file-if-exists=.env bin/backend.js",
     "dev": "node tools/build.mjs --watch",
     "demo": "node tools/build.mjs --demo",
-    "test": "node test/sim.test.mjs",
+    "test": "node tools/build.mjs && node test/sim.test.mjs",
     "long-run": "node tools/long-run.mjs",
     "build:earth": "node tools/build-earth.mjs",
     "build:icons": "node tools/build-icons.mjs"

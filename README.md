@@ -19,7 +19,7 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 | `npm run build` | builds `public/` (the site) and `bin/backend.js` (the server) |
 | `npm run serve` | runs `bin/backend.js` without rebuilding |
 | `npm run demo` | also writes `demo.html`: the page standalone, data inlined, no server |
-| `npm test` | determinism, stability and wire-format consistency of the simulation |
+| `npm test` | builds, then checks determinism, stability, wire format, and that `engine.js` matches the library |
 | `npm run long-run -- 20000 1000` | runs the world offline for hours, prints the curves |
 | `node tools/long-run.mjs 95000 5000 --db aged.db` | same, and writes the aged world to a new database (checkpointed): `DB=aged.db npm start` |
 | `node tools/long-run.mjs 95000 5000 --resume aged.db` | continues that world in place (stop the server using it first) |
@@ -106,6 +106,18 @@ rendered client-side in the visitor's language; lineage names are translated by 
   wheel / pinch to zoom (confined to the globe: the page never zooms). After 6 s without interaction, the
   camera glides to the region being computed — yours, otherwise another witness's.
 
+### Compute engine
+
+`src/lib/engine.js` is bundled alone into `public/engine.js` (12 kB, global `DrakarEngine`): everything needed to
+compute a work unit, with a JavaScript interface and a string interface for hosts that only exchange strings
+with a JS engine (the Android app). Every witness loads it at runtime — the page included — at the version the
+server announces in `hello`; a result computed with another engine is refused (`nack` `engine outdated`, with
+the engine to load). A page left open across a deployment, or an app with a stale cache, therefore switches to
+the new rules by itself. `npm test` checks that the bundle computes exactly what the library computes.
+
+The full witness protocol (data files, messages, shapes, engine) is documented in
+[`docs/protocol.md`](docs/protocol.md).
+
 ### Protocol (WebSocket `/ws`)
 
 Everything dynamic goes through a JSON text WebSocket with `permessage-deflate` (negotiated, no context
@@ -114,9 +126,9 @@ takeover, built-in zlib; `ws-mini.js`). Objects travel as **positional arrays** 
 **deltas**.
 
 Client → server: `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (every 500 ms during
-computation, **differential**: only the groups that moved) · `result {result, hash, ms, verify}` (final groups,
+computation, **differential**: only the groups that moved) · `result {result, hash, ms, verify, engine}` (final groups,
 new items, and only the events the server keeps) · `resync` (sequence gap).
-Server → client: `hello {world, peers}` · `unit {unit, verify}` (the region's groups + settlements and routes
+Server → client: `hello {engine, world, peers}` · `unit {unit, verify}` (the region's groups + settlements and routes
 within ±80 cells) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead, changed,
 removedSettlements, regions, totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (the others).
 

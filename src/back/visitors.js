@@ -1,11 +1,12 @@
 // The visitors' WebSocket: leases, live progress relayed between witnesses, results, deltas.
 // server → client: hello, world, delta, chronicle, market, online, tick, lease, progress, release, unit, ack, nack
-// client → server: hello {sigil}, lease, result {result, hash, ms, verify}, progress {region, step, agents, gone, full}, resync
+// client → server: hello {sigil}, lease, result {result, hash, ms, verify, engine}, progress {region, step, agents, gone, full}, resync
+// The full protocol is described in docs/protocol.md.
 import { hashStr, packUnit, unpackResult, packEntry } from '../lib/index.js';
 import { attachWebSocket } from './ws-mini.js';
 import { WS_PATH, VERIFY_EVERY, PROGRESS_MAX, SIGIL_RE, HEARTBEAT_MS } from './constants.js';
 
-export function createVisitors(server, world, { markDirty, logUnit }) {
+export function createVisitors(server, world, { markDirty, logUnit, engineVersion }) {
   const peers = new Map();                      // ws → { sigil, region, step, at }
   let unitCounter = 0;
   // a sigil is chosen by the browser; without one, it is derived from the IP and the user agent
@@ -26,7 +27,7 @@ export function createVisitors(server, world, { markDirty, logUnit }) {
       try {
         if (m.t === 'hello') {
           me.sigil = sigilOf(ws, m.sigil);
-          ws.send({ t: 'hello', sigil: me.sigil, online: hub.size, world: world.snapshot(hub.size), peers: peerList(me) });
+          ws.send({ t: 'hello', sigil: me.sigil, online: hub.size, engine: engineVersion(), world: world.snapshot(hub.size), peers: peerList(me) });
           hub.broadcast({ t: 'online', online: hub.size });
         }
         else if (m.t === 'lease') {
@@ -49,6 +50,15 @@ export function createVisitors(server, world, { markDirty, logUnit }) {
         else if (m.t === 'result') {
           if (!me.sigil || !m.result) return;
           const t0 = Date.now();
+          // computed with another engine than the server's (a page left open across a deployment, an app with a
+          // stale cache): refused, the region is freed at once, and the witness is told which engine to load
+          const current = engineVersion();
+          if (current && m.engine !== current) {
+            world.release(m.result.region | 0, me.sigil);
+            const region = me.region; me.region = null; me.step = 0;
+            if (region != null) hub.broadcast({ t: 'release', region, sigil: me.sigil }, ws);
+            return ws.send({ t: 'nack', reason: 'engine outdated', engine: current });
+          }
           let result; try { result = unpackResult(m.result); } catch { return ws.send({ t: 'nack', reason: 'unreadable result' }); }
           const r = world.integrate(result, me.sigil, { verify: !!m.verify });
           logUnit(t0, m.result.region ?? -1, m.result.tick ?? -1, me.sigil, String(m.hash || '').slice(0, 16), r.verified ? 1 : 0, r.ok ? 1 : 0, m.ms | 0, world.climate);

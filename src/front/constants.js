@@ -33,6 +33,7 @@ export const PROGRESS_EVERY_MS = 500;      // progress sent to the other witness
 // connection and recovery (the server sends a heartbeat every 20 s)
 export const NET = {
   path: '/ws',
+  engine: '/engine.js',
   backoffMin: 1000, backoffMax: 15000,     // reconnection delay, doubling
   deadAfterMs: 45000,                      // no message for this long: the link is dead
   watchEveryMs: 5000,

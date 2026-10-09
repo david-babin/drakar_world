@@ -8,10 +8,12 @@ import { setWorld } from './store.js';
 import { addChron } from './chronicle.js';
 import { runUnit, abortUnit, currentRun, progressSender, sleep } from './compute.js';
 import { NET } from './constants.js';
+import { engine, engineVersion, ensureEngine } from './engine.js';
 
 const { STEPS } = S;
 export async function loopServer() {
-  const A = await loadAssets(); app.T = S.loadTerrain(A.terrain);
+  const A = await loadAssets(); app.T = engine().loadTerrain(A.terrain);
+  let engineReady = Promise.resolve();          // the engine version the server computes with
   // Recovery. The server sends a heartbeat every 20 s; with no message for 45 s the connection is dead.
   // A socket that is dropped is abandoned at once (its late events are ignored): waiting for its closing
   // handshake can take minutes on a mobile network that vanished during sleep. Coming back to the foreground
@@ -35,7 +37,7 @@ export async function loopServer() {
       lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
       switch (m.t) {
-        case 'hello': app.link = 'ok'; app.online = m.online; setWorld(S.unpackSnapshot(m.world)); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
+        case 'hello': engineReady = ensureEngine(m.engine).catch(() => {}); app.link = 'ok'; app.online = m.online; setWorld(S.unpackSnapshot(m.world)); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
         case 'world': setWorld(S.unpackSnapshot(m.world)); break;
         case 'delta':
           if (!app.world || m.seq !== app.world.seq + 1) { send({ t: 'resync' }); break; }     // gap in the sequence: ask for the full state
@@ -90,14 +92,16 @@ export async function loopServer() {
   for (;;) {
     try {
       if (sock?.readyState !== 1 || app.link !== 'ok') { await sleep(NET.backoffMin); continue; }
+      await engineReady;
       const m = await ask({ t: 'lease' });
       if (m.t !== 'unit') { app.lease = null; await sleep(NET.noUnitRetryMs); continue; }
-      const unit = S.unpackUnit(m.unit), verify = m.verify;
+      const unit = engine().unpackUnit(m.unit), verify = m.verify;
       const started = Date.now();
       const prog = progressSender(unit.region);
       await runUnit(unit, verify, async (result, ms) => {
         if (Date.now() - started > NET.leaseStaleMs || sock?.readyState !== 1) return;   // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
-        const r = await ask({ t: 'result', result: S.packResult(result), verify, hash: S.hashResult(result), ms: Math.round(ms) });
+        const r = await ask({ t: 'result', result: engine().packResult(result), verify, hash: engine().hashResult(result), ms: Math.round(ms), engine: engineVersion() });
+        if (r.t === 'nack' && r.engine) engineReady = ensureEngine(r.engine).catch(() => {});   // the server moved on: next unit with its engine
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send(prog(step, agents)));
       app.lease = null;

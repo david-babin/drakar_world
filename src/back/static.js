@@ -46,5 +46,7 @@ export function createStatic(dir, { dev = false, commit = null } = {}) {
     return true;
   }
   const sum = k => [...files.values()].reduce((n, e) => n + (e[k] || e.raw).length, 0) >> 10;
-  return { serve, summary: () => `${files.size} files, ${sum('raw')} kB raw, ${sum('br')} kB brotli` };
+  // the current fingerprint of a file (the engine's version, for instance)
+  const fingerprintOf = rel => files.get(rel)?.etag.slice(1, -1) || null;
+  return { serve, fingerprintOf, summary: () => `${files.size} files, ${sum('raw')} kB raw, ${sum('br')} kB brotli` };
 }

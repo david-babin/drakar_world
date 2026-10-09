@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { World, loadTerrain, packEntry, regimeOf } from '../lib/index.js';
 import { config } from './config.js';
-import { SAVE_MS, SNAPSHOT_MS, RECENT_UNITS } from './constants.js';
+import { SAVE_MS, SNAPSHOT_MS, RECENT_UNITS, ENGINE_FILE } from './constants.js';
 import { openDatabase } from './db.js';
 import { createStatic } from './static.js';
 import { createVisitors } from './visitors.js';
@@ -47,7 +47,7 @@ const server = http.createServer((req, res) => {
 });
 
 // ---------- visitors ----------
-const visitors = createVisitors(server, world, { markDirty, logUnit: store.logUnit });
+const visitors = createVisitors(server, world, { markDirty, logUnit: store.logUnit, engineVersion: () => statics.fingerprintOf(ENGINE_FILE) });
 
 // ---------- market → climate ----------
 const market = createMarket(store.db, { key: config.finnhubKey, symbol: config.symbol });

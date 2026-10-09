@@ -101,6 +101,12 @@ export class World {
     return unit;
   }
 
+  // gives a leased region back before its lease expires (result refused upstream)
+  release(region, sigil) {
+    const l = this.leases.get(region);
+    if (l && l.sigil === sigil) this.leases.delete(region);
+  }
+
   integrate(result, sigil, { now = Date.now(), verify = false } = {}) {
     const l = this.leases.get(result.region);
     if (!l || l.sigil !== sigil || l.tick !== result.tick) return { ok: false, reason: 'lease invalid or expired' };

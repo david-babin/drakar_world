@@ -1,5 +1,5 @@
 // The compute loop: one work unit at a time, sliced across animation frames so the page stays fluid.
-import { simulateUnitGen } from '../lib/index.js';
+import { engine } from './engine.js';
 import { app } from './state.js';
 import { tele } from './telemetry.js';
 import { PROGRESS_EVERY_MS } from './constants.js';
@@ -11,7 +11,7 @@ let run = null;
 export const currentRun = () => run;
 export function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } app.lease = null; }
 export async function runUnit(unit, verify, onDone, onProgress) {
-  const gen = simulateUnitGen(app.T, unit);
+  const gen = engine().simulateUnitGen(app.T, unit);
   const L = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
   app.lease = L;
   let lastDec = 0, lastT = performance.now(), lastProg = 0;

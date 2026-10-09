@@ -67,3 +67,31 @@ console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  
   console.log(`settlement changes over the run: ${wire.changed} changed, ${wire.removed} abandoned`);
   console.log(`wire format OK · year ${ref.year} · delta ${(wire.delta / wire.n / 1024).toFixed(1)} kB · unit ${(wire.unit / wire.n / 1024).toFixed(1)} kB · result ${(wire.result / wire.n / 1024).toFixed(1)} kB · snapshot ${(JSON.stringify(w2.snapshot(1)).length / 1024).toFixed(1)} kB`);
 }
+
+// ---------- the engine bundle (public/engine.js, built by npm run build) ----------
+// It must compute exactly what the library computes: through its JavaScript API and through its string API
+// (the one the Android app uses).
+{
+  const vm = await import('node:vm');
+  const file = new URL('../public/engine.js', import.meta.url);
+  if (!fs.existsSync(file)) console.log('engine: public/engine.js missing — run npm run build first (skipped)');
+  else {
+    const { packUnit, unpackResult } = await import('../src/lib/index.js');
+    const ctx = vm.createContext({}); vm.runInContext(fs.readFileSync(file, 'utf8'), ctx);
+    const E = ctx.DrakarEngine;
+    E.init(fs.readFileSync(new URL('../assets/earth/terrain.bin', import.meta.url)).toString('base64'));
+    const w4 = World.create(11, TERRAIN);
+    for (let i = 0; i < 30; i++) {
+      w4.setMarket({ change: Math.sin(i) });
+      const u = w4.lease('TEST-0004'), packed = JSON.stringify(packUnit(u));
+      const ref = simulateUnit(w4.T, u);
+      const viaJs = E.simulateUnit(E.loadTerrain(fs.readFileSync(new URL('../assets/earth/terrain.bin', import.meta.url))), E.unpackUnit(JSON.parse(packed)));
+      const viaStrings = JSON.parse(E.compute(packed));
+      if (E.hashResult(viaJs) !== hashResult(ref)) throw new Error('engine (JS API) differs from the library');
+      if (viaStrings.hash !== hashResult(ref) || hashResult(unpackResult(viaStrings.result)) !== viaStrings.hash) throw new Error('engine (string API) differs from the library');
+      const ok = w4.integrate(unpackResult(viaStrings.result), 'TEST-0004', { verify: true });
+      if (!ok.ok) throw new Error('engine result refused: ' + ok.reason);
+    }
+    console.log(`engine OK · ${(fs.statSync(file).size / 1024).toFixed(1)} kB · 30 units identical to the library, verified by the world`);
+  }
+}

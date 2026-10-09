@@ -9,6 +9,7 @@ export const LEGACY_DB = 'monde.db';           // former database name, adopted 
 
 // visitors (WebSocket)
 export const WS_PATH = '/ws';
+export const ENGINE_FILE = 'engine.js';        // the compute engine every witness loads (see docs/protocol.md)
 export const HEARTBEAT_MS = 20_000;            // application heartbeat: clients detect a dead link with it
 export const WS_PING_MS = 25_000;              // protocol ping: the server drops silent clients with it
 export const WS_MAX_MESSAGE = 4 * 1024 * 1024;
