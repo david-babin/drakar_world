@@ -3,6 +3,7 @@
 // type: 0 deep sea · 1 shelf · 2 plain · 3 hills · 4 mountain · 5 ice
 import { W, H } from './constants/grid.js';
 import { latOf, idx } from './geo.js';
+import { RULES } from './constants/rules.js';
 
 export function loadTerrain(bytes) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -15,7 +16,15 @@ export function loadTerrain(bytes) {
     const k = y * w + x, t = type[k];
     if (t >= 2 && t <= 4) coast[k] = (at(x - 1, y) < 2 || at(x + 1, y) < 2 || (y > 0 && type[k - w] < 2) || (y < h - 1 && type[k + w] < 2)) ? 1 : 0;
   }
-  return { type, fert, coast, w, h };
+  // fertility summed around each cell (walkable land only, radius RULES.localRadius, wraps in longitude):
+  // the local carrying capacity
+  const r = RULES.localRadius, fertNear = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let dy = -r; dy <= r; dy++) { const ny = y + dy; if (ny < 0 || ny >= h) continue; for (let dx = -r; dx <= r; dx++) { const kk = ny * w + ((x + dx) % w + w) % w; if (type[kk] >= 2 && type[kk] <= 4) sum += fert[kk] / 255; } }
+    fertNear[y * w + x] = sum;
+  }
+  return { type, fert, coast, fertNear, w, h };
 }
 export const walkable = t => t >= 2 && t <= 4;
 

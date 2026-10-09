@@ -13,7 +13,7 @@ export const HEARTBEAT_MS = 20_000;            // application heartbeat: clients
 export const WS_PING_MS = 25_000;              // protocol ping: the server drops silent clients with it
 export const WS_MAX_MESSAGE = 4 * 1024 * 1024;
 export const WS_DEFLATE_MIN = 192;             // below this, compression gains nothing
-export const PROGRESS_MAX = 256;               // groups relayed per progress message
+export const PROGRESS_MAX = 512;               // groups relayed per progress message
 export const SIGIL_RE = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const RECENT_UNITS = 20;                // units listed by /api/stats
 

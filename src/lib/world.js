@@ -91,7 +91,7 @@ export class World {
       region: reg.id, rx, ry, tick: reg.tick, steps: STEPS,
       seed: hashMix(this.s.seed, reg.id, reg.tick), idBase: this.s.nextId,
       climate: Math.round(this.climate * 1000) / 1000,
-      cap: Math.max(4, Math.round(this.regionFert[reg.id] * RULES.capPerFert * techOf(reg.tick))),
+      cap: Math.max(4, Math.round(this.regionFert[reg.id] * RULES.capPerFert * RULES.regionSlack * techOf(reg.tick))),
       dominant: total ? { lin: domLin, share: Math.round(domPop / total * 1000) / 1000 } : null,
       freeLin: extinct.length ? extinct[0].id : -1,
       agents: clone(agents), settlements: clone(settlements), routes: clone(routes),

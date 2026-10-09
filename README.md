@@ -192,11 +192,15 @@ sea is a "sea lane" (dashed). Each route adds +12 % yield to the settlement (max
 All constants live in `RULES` (`src/lib/constants/rules.js`); the server embeds the world-level context in each unit, so
 the simulation stays deterministic and verifiable.
 
-- **Capacity grows with the land and with time.** A region holds `Σ fertility × 0.06 × tech` groups, where
-  `tech = 1 + log10(1 + tick / 20,000)` (1 at genesis, ~2 after a day of witnesses, ~3.5 after a thousand
-  hours). Tech also raises yields (up to +15 % per level). Barren regions hold at least 4 groups.
-- **Crossings.** A coastal group of 40+ souls may sail straight out over open sea (range 12 cells + 10 per
-  tech level) and land on fertile ground: the Americas and the islands get settled.
+- **Capacity follows the land, locally, and grows with time.** A group splits only while the 9 × 9 cells
+  around it hold fewer groups than their fertility can carry (`Σ fertility × 0.06 × tech`), and its offspring
+  settles on the emptier side. Growth therefore moves out to the frontier and empty fertile land fills wherever
+  it lies, instead of piling up where the longships landed. `tech = 1 + log10(1 + tick / 20,000)` (1 at
+  genesis, ~2 after a day of witnesses, ~3.5 after a thousand hours) also raises yields (up to +15 % per
+  level). Each region keeps a guard of 1.5 × its summed capacity.
+- **Crossings.** A coastal group of 40+ souls may sail straight out over the sea (range 12 cells + 10 per tech
+  level; a strait such as the Channel is enough) and land on fertile ground: islands and new continents get
+  settled.
 - **Assimilation.** Every 4 seasons, a group whose surroundings (4 × 4-cell blocks) hold more than 3× as many
   souls of another lineage may take on its colours (4 % per check). Big neighbours absorb small ones.
 - **Counterweights to domination.** When one lineage holds more than 40 % of the world, its groups may revolt

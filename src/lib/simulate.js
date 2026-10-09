@@ -28,6 +28,7 @@ export function* simulateUnitGen(T, unit) {
   const yieldK = 1 + 0.45 * climate;                      // plenty / scarcity
   const cap = unit.cap || MAX_AGENTS_REGION;              // how many groups this region can hold now
   const tech = techOf(unit.tick);
+  const LR = RULES.localRadius;
   const dom = unit.dominant || null, freeLin = unit.freeLin ?? -1;
   const newSettlements = [], newRoutes = [], events = [];
   const changed = new Map(), removed = new Set();         // settlements of this region that changed lineage, were seen, or were abandoned
@@ -43,6 +44,12 @@ export function* simulateUnitGen(T, unit) {
     const occ = new Map();
     for (const a of agents) if (a.pop > 0) { const k = idx(a.x, a.y); (occ.get(k) || occ.set(k, []).get(k)).push(a); }
     const born = [];
+    // living groups within r cells of a cell (RULES.localRadius by default)
+    const crowdAround = (x, y, r = LR) => {
+      let n = 0;
+      for (let dy = -r; dy <= r; dy++) { const ny = y + dy; if (ny < 0 || ny >= H) continue; for (let dx = -r; dx <= r; dx++) { const o = occ.get(idx(x + dx, ny)); if (o) for (const b of o) if (b.pop > 0) n++; } }
+      return n;
+    };
     let count = living();
 
     for (const a of agents) {
@@ -86,7 +93,7 @@ export function* simulateUnitGen(T, unit) {
           if (ny < 1 || ny >= H - 1) break;
           const t = T.type[idx(nx, ny)];
           if (t < 2) { sea++; continue; }
-          if (sea >= 3 && walkable(t) && T.fert[idx(nx, ny)] > 70) { tx = nx; ty = ny; }
+          if (sea >= RULES.voyageMinSea && walkable(t) && T.fert[idx(nx, ny)] > 70) { tx = nx; ty = ny; }
           break;
         }
         if (tx >= 0) {
@@ -127,17 +134,27 @@ export function* simulateUnitGen(T, unit) {
         } else a.stay++;
       } else a.stay++;
 
-      // split — plenty makes it easier
-      if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < cap) {
-        const free = [];
+      // split — plenty makes it easier. The land around decides: a group splits only while its neighbourhood
+      // holds fewer groups than its fertility can carry, and the offspring settles towards the emptier, richer
+      // side. Growth thus moves out to the frontier: empty fertile land fills wherever it lies.
+      if (a.pop >= G.splitPop * (1 - 0.2 * climate) && a.food > a.pop * 1.5 && count < cap
+          && crowdAround(a.x, a.y) < T.fertNear[k] * RULES.capPerFert * tech) {
+        let best = null, bs = -1e9;
         for (const [dx, dy] of DIRS) {
           const nx = wrapX(a.x + dx), ny = a.y + dy;
-          if (ny >= 0 && ny < H && walkable(T.type[idx(nx, ny)])) free.push([nx, ny, dx, dy]);
+          if (ny < 0 || ny >= H) continue;
+          const nk = idx(nx, ny);
+          if (!walkable(T.type[nk])) continue;
+          if (T.fert[nk] < 40) continue;                                   // barren: nobody settles there
+          const sc = T.fert[nk] / 255 * 0.5 - crowdAround(nx, ny, 2) * 0.4 + rand() * 0.2;   // emptiness first, then richness
+          if (sc > bs) { bs = sc; best = [nx, ny, dx, dy]; }
         }
-        if (free.length) {
-          const [nx, ny, dx, dy] = free[Math.floor(rand() * free.length)];
+        if (best) {
+          const [nx, ny, dx, dy] = best;
           const half = Math.floor(a.pop / 2);
-          born.push({ id: nextId++, x: nx, y: ny, dx, dy, pop: half, food: Math.floor(a.food / 2), g: mutate(a.g, G.mut, rand), lin: a.lin, born: tick, stay: 0 });
+          const child = { id: nextId++, x: nx, y: ny, dx, dy, pop: half, food: Math.floor(a.food / 2), g: mutate(a.g, G.mut, rand), lin: a.lin, born: tick, stay: 0 };
+          born.push(child);
+          const ck = idx(nx, ny); (occ.get(ck) || occ.set(ck, []).get(ck)).push(child);   // counted at once by the neighbours
           a.pop -= half; a.food -= Math.floor(a.food / 2);
           count++;
         }

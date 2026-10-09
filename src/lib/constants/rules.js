@@ -1,10 +1,13 @@
 // Rules of growth, contact and rebirth (tuned with tools/long-run.mjs).
 export const MAX_AGENTS_REGION = 28;      // fallback when a unit carries no capacity
 export const RULES = {
-  capPerFert: 0.06,          // groups a region can hold per unit of summed fertility, before technology
+  capPerFert: 0.06,          // groups the land can hold per unit of summed fertility, before technology
+  localRadius: 4,            // capacity is checked around each group: (2r+1)² cells, so empty land fills where it lies
+  regionSlack: 1.5,          // the whole region may hold this many times its summed capacity (a guard, not the rule)
   techScale: 20000,          // tech = 1 + log10(1 + tick / techScale): ×1.3 after ~1 h of visits, ×3 after ~100 h, ×4 after ~1,000 h
   voyageP: 0.0012,           // chance per season that a coastal group sets out across the sea (× tech)
   voyageRange: 12,           // base crossing range in cells (+ 10 per tech level)
+  voyageMinSea: 1,           // sea cells a crossing must pass over (1: straits such as the Channel count)
   assimRatio: 3,             // a group joins a neighbouring lineage when that lineage is this many times stronger locally
   assimP: 0.04,              // chance per check (every 4 seasons)
   revoltShare: 0.40,         // a lineage holding more than this share of all souls breeds revolts
