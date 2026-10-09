@@ -5,9 +5,11 @@ FROM node:22-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY tools ./tools
-COPY src ./src
-COPY assets ./assets
+# sources, Earth data and .git when the context has it (the commit shown on the page is read from it;
+# SOURCE_COMMIT, passed by Coolify, takes precedence) — see .dockerignore
+COPY . .
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=$SOURCE_COMMIT
 RUN npm run build
 
 # ---- runtime: no dependencies (node:sqlite and WebSocket are built into Node 22) ----

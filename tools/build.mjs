@@ -24,6 +24,22 @@ const at = (...p) => path.join(ROOT, ...p);
 const EARTH = ['terrain.bin', 'base.png', 'land.bin', 'coasts.bin', 'contours.bin'];
 const PUBLIC = at('public'), BIN = at('bin');
 const args = new Set(process.argv.slice(2));
+// the commit being built, shown at the bottom left of the page: from the CI (Coolify passes SOURCE_COMMIT),
+// otherwise read from .git without needing git itself (the Docker build stage has no git binary)
+function commitOf() {
+  const env = process.env.SOURCE_COMMIT || process.env.COMMIT_SHA || process.env.GIT_COMMIT;
+  if (env && /^[0-9a-f]{7,40}$/i.test(env)) return env.slice(0, 7);
+  try {
+    const head = fs.readFileSync(at('.git/HEAD'), 'utf8').trim();
+    if (!head.startsWith('ref: ')) return head.slice(0, 7);                         // detached HEAD
+    const ref = head.slice(5), loose = at('.git', ref);
+    if (fs.existsSync(loose)) return fs.readFileSync(loose, 'utf8').trim().slice(0, 7);
+    const packed = fs.readFileSync(at('.git/packed-refs'), 'utf8').split('\n').find(l => l.endsWith(' ' + ref));
+    if (packed) return packed.slice(0, 7);
+  } catch {}
+  return 'dev';
+}
+const VERSION = commitOf();
 const kB = n => (n / 1024).toFixed(1) + ' kB';
 const log = (...a) => console.log('build ·', ...a);
 
@@ -57,6 +73,7 @@ const squeezeHtml = h => h.replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><
 // (function replacers: minified code is full of `$&`-like sequences that a replacement string would expand)
 const page = async (script) => { const css = await styles(); return squeezeHtml(fs.readFileSync(at('src/front/index.html'), 'utf8'))
   .replace('/*__CSS__*/', () => css)
+  .replace('/*__VERSION__*/', () => VERSION)
   .replace('<script src="/*__APP__*/" defer></script>', () => script); };
 
 function copyDir(from, to) {
@@ -110,7 +127,7 @@ async function buildAll({ clean = false } = {}) {
   if (clean) { fs.rmSync(PUBLIC, { recursive: true, force: true }); fs.rmSync(BIN, { recursive: true, force: true }); }
   ensureEarth();
   const [{ app, html }, back] = await Promise.all([buildSite(), buildBack()]);
-  let line = `public/app.js ${kB(app.length)} · index.html ${kB(html.length)} · bin/backend.js ${kB(back)}`;
+  let line = `${VERSION} · public/app.js ${kB(app.length)} · index.html ${kB(html.length)} · bin/backend.js ${kB(back)}`;
   if (args.has('--demo')) line += ` · demo.html ${kB((await buildDemo(app)).length)}`;
   log(`${line} · ${Date.now() - t0} ms`);
 }
