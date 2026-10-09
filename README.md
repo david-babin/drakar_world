@@ -22,6 +22,8 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 | `npm test` | determinism, stability and wire-format consistency of the simulation |
 | `npm run long-run -- 20000 1000` | runs the world offline for hours, prints the curves |
 | `node tools/long-run.mjs 95000 5000 --db aged.db` | same, and writes the aged world to a new database (checkpointed): `DB=aged.db npm start` |
+| `node tools/long-run.mjs 95000 5000 --resume aged.db` | continues that world in place (stop the server using it first) |
+| `node tools/long-run.mjs 20000 1000 --from world.db --db branch.db` | starts from an existing world, writes a new database, leaves the source untouched |
 | `npm run build:earth` | rebuilds the Earth data into `assets/earth/` |
 | `npm run build:icons` | renders the icons from `icon.svg` (requires playwright) |
 
@@ -211,7 +213,9 @@ routes, settlement areas above 10,000 and state size. With `--db <file>`, the ag
 that it ends now, ready for `DB=<file> npm start` (or `DB=<file>` in `.env`); an existing file is never
 overwritten. It is checkpointed every `--save-every` units (5,000 by default) and at the end; Ctrl+C stops
 after the current unit and saves. On Windows, run it with `node tools/long-run.mjs …` rather than through npm,
-which terminates its child at once on Ctrl+C (the last checkpoint is kept either way). Over 25 simulated hours: ~300,000 souls, 10–12 lineages
+which terminates its child at once on Ctrl+C (the last checkpoint is kept either way). `--from <file>` starts from the world
+stored in a database (left untouched); `--resume <file>` continues it in place. The existing history is moved
+back in time so that the new run follows it without a gap and still ends now. Over 25 simulated hours: ~300,000 souls, 10–12 lineages
 alive, the largest holding ~20 % of the world, 14–15 regions held.
 
 ### Ideas

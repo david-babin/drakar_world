@@ -1,8 +1,10 @@
 // Accelerated offline run of the shared world, to watch long-term curves before changing the rules.
-//   node tools/long-run.mjs [units=20000] [every=1000] [seed] [--db world-dev.db]
+//   node tools/long-run.mjs [units=20000] [every=1000] [seed] [--db file] [--from file | --resume file] [--save-every n]
 // ~950 units ≈ one hour of a single visitor watching. Prints one CSV-ish line per `every` units.
 // With --db, the aged world is written to a NEW database, ready to be opened by the server:
-// DB=world-dev.db npm start. An existing file is never overwritten. The database is checkpointed every
+// DB=world-dev.db npm start. An existing file is never overwritten, except the one given to --resume.
+// --from f starts from the world stored in f (left untouched); --resume f continues it in place (stop the
+// server using f first: it would overwrite the result with its own copy). The database is checkpointed every
 // --save-every units (default 5000) and at the end: a run that is killed loses at most the last stretch.
 // Ctrl+C stops cleanly and saves; on Windows, run it with node directly rather than through npm, which
 // terminates its child at once on Ctrl+C.
@@ -30,19 +32,43 @@ function areas(agents) {
 }
 
 const T = loadTerrain(fs.readFileSync(new URL('../assets/earth/terrain.bin', import.meta.url)));
-const argv = process.argv.slice(2), dbAt = argv.indexOf('--db');
-const dbFile = dbAt >= 0 ? path.resolve(argv[dbAt + 1] || '') : null;
+const argv = process.argv.slice(2);
+const USAGE = 'usage: node tools/long-run.mjs [units] [every] [seed] [--db file] [--from file | --resume file] [--save-every n]';
+const OPTIONS = ['--db', '--from', '--resume', '--save-every'];
+const fail = msg => { console.error(msg + '\n' + USAGE); process.exit(1); };
+const opt = name => { const k = argv.indexOf(name); if (k < 0) return null; const v = argv[k + 1]; if (!v || v.startsWith('--')) fail(`${name} needs a value`); return v; };
+const unknown = argv.filter(a => a.startsWith('--') && !OPTIONS.includes(a));
+if (unknown.length) fail(`unknown option ${unknown.join(', ')}`);
 const pos = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
 const N = +(pos[0] || 20000), every = +(pos[1] || 1000), seed = +(pos[2] || 20261007);
-if (dbAt >= 0 && (!argv[dbAt + 1] || argv[dbAt + 1].startsWith('--'))) { console.error('--db needs a file name'); process.exit(1); }
-const unknown = argv.filter(a => a.startsWith('--') && !['--db', '--save-every'].includes(a));
-if (unknown.length) { console.error(`unknown option ${unknown.join(', ')} · usage: node tools/long-run.mjs [units] [every] [seed] [--db file] [--save-every n]`); process.exit(1); }
-const saveAt = argv.indexOf('--save-every'), saveEvery = saveAt >= 0 ? Math.max(100, +argv[saveAt + 1] || 5000) : 5000;
-if (dbFile && ['', '-wal', '-shm'].some(ext => fs.existsSync(dbFile + ext))) { console.error(`${dbFile} already exists: choose another name or delete it first (never overwritten)`); process.exit(1); }
+const saveEvery = Math.max(100, +(opt('--save-every') || 5000));
+// --resume f  =  --from f --db f : continue a world in place
+const resume = opt('--resume');
+if (resume && (opt('--from') || opt('--db'))) fail('--resume already sets --from and --db');
+const fromFile = resume || opt('--from') ? path.resolve(resume || opt('--from')) : null;
+const dbFile = resume || opt('--db') ? path.resolve(resume || opt('--db')) : null;
+if (fromFile && !fs.existsSync(fromFile)) fail(`${fromFile} not found`);
+// the output is a new file, or the very file the run starts from (explicitly continued); anything else is never overwritten
+if (dbFile && dbFile !== fromFile && ['', '-wal', '-shm'].some(ext => fs.existsSync(dbFile + ext))) fail(`${dbFile} already exists: choose another name, delete it first, or continue it with --resume`);
 
 // the run is placed in the past so that it ends now: the server sees a world last computed a moment ago
 const start = Date.now() - N * UNIT_MS, clock = i => start + i * UNIT_MS;
-const w = World.create(seed, T, start);
+// moves every date of a state by `shift` ms
+function shiftDates(s, shift) {
+  s.created += shift; s.lastActivity += shift;
+  for (const e of s.chronicle) e.t += shift;
+  for (const r of s.regions) if (r.last) r.last += shift;
+  for (const c of Object.values(s.contributors)) { c.first += shift; c.last += shift; }
+  return s;
+}
+let w;
+if (fromFile) {
+  // an existing world: its history is moved back so that this run follows it without a gap
+  const src = openDatabase(fromFile), state = src.loadState(); src.close();
+  if (!state) fail(`${fromFile} holds no world`);
+  w = new World(shiftDates(state, start - state.lastActivity), T);
+  console.log(`starting from ${fromFile} · year ${w.year} · ${w.s.agents.length} groups · ${w.s.totals.units} units already computed`);
+} else w = World.create(seed, T, start);
 const caps = [...w.regionFert].map(f => Math.round(f * RULES.capPerFert));
 console.log('region capacity at tech 1:', caps.join(' '), '· sum', caps.reduce((a, b) => a + b, 0));
 
@@ -57,11 +83,7 @@ if (dbFile) for (const sig of ['SIGINT', 'SIGBREAK', 'SIGHUP', 'SIGTERM']) proce
 let store = null;
 function checkpoint(final = false) {
   if (!dbFile) return;
-  const shift = Date.now() - clock(done), s = JSON.parse(JSON.stringify(w.s));
-  s.created += shift; s.lastActivity += shift;
-  for (const e of s.chronicle) e.t += shift;
-  for (const r of s.regions) if (r.last) r.last += shift;
-  for (const c of Object.values(s.contributors)) { c.first += shift; c.last += shift; }
+  const s = shiftDates(JSON.parse(JSON.stringify(w.s)), Date.now() - clock(done));
   store ||= openDatabase(dbFile);
   store.saveState(JSON.stringify(s), Date.now());
   if (final) { store.close(); store = null; }
