@@ -35,6 +35,8 @@ const dbFile = dbAt >= 0 ? path.resolve(argv[dbAt + 1] || '') : null;
 const pos = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
 const N = +(pos[0] || 20000), every = +(pos[1] || 1000), seed = +(pos[2] || 20261007);
 if (dbAt >= 0 && (!argv[dbAt + 1] || argv[dbAt + 1].startsWith('--'))) { console.error('--db needs a file name'); process.exit(1); }
+const unknown = argv.filter(a => a.startsWith('--') && !['--db', '--save-every'].includes(a));
+if (unknown.length) { console.error(`unknown option ${unknown.join(', ')} · usage: node tools/long-run.mjs [units] [every] [seed] [--db file] [--save-every n]`); process.exit(1); }
 const saveAt = argv.indexOf('--save-every'), saveEvery = saveAt >= 0 ? Math.max(100, +argv[saveAt + 1] || 5000) : 5000;
 if (dbFile && ['', '-wal', '-shm'].some(ext => fs.existsSync(dbFile + ext))) { console.error(`${dbFile} already exists: choose another name or delete it first (never overwritten)`); process.exit(1); }
 
