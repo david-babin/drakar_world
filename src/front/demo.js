@@ -30,7 +30,7 @@ export async function loopDemo() {
   setWorld(S.unpackSnapshot(JSON.parse(JSON.stringify(w.snapshot(app.online)))));
   for (;;) {
     const unit = w.lease(ME);
-    await runUnit(unit, false, (result) => { const r = w.integrate(result, ME); tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; S.applyDelta(app.world, JSON.parse(JSON.stringify(r.delta))); for (const e of r.entries) addChron(S.unpackEntry(S.packEntry(e)), true); });
+    await runUnit(unit, false, (result) => { const r = w.integrate(result, ME); tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; S.applyDelta(app.world, JSON.parse(JSON.stringify(r.delta))); app.version++; for (const e of r.entries) addChron(S.unpackEntry(S.packEntry(e)), true); });
     app.lease = null;
     await sleep(NET.pauseMin + Math.random() * NET.pauseJitter);
   }

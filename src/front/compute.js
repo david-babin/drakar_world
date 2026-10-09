@@ -9,7 +9,7 @@ export const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1
 // the promise then resolves at once, even if the tab is hidden and no animation frame will come.
 let run = null;
 export const currentRun = () => run;
-export function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } app.lease = null; }
+export function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } app.lease = null; app.version++; }
 export async function runUnit(unit, verify, onDone, onProgress) {
   const gen = engine().simulateUnitGen(app.T, unit);
   const L = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
@@ -24,7 +24,7 @@ export async function runUnit(unit, verify, onDone, onProgress) {
       do {
         r = gen.next();
         if (r.done) break;
-        L.agents = r.value.agents; L.step = r.value.step + 1;
+        L.agents = r.value.agents; L.step = r.value.step + 1; app.version++;
       } while (performance.now() - start < budgetMs() && L.step % 2 !== 0);
       const now = performance.now();
       if (r.value?.decisions != null && now - lastT > 400) { tele.dps = Math.round((r.value.decisions - lastDec) / ((now - lastT) / 1000)); lastDec = r.value.decisions; lastT = now; }

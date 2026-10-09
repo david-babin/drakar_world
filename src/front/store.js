@@ -5,6 +5,6 @@ import { renderChronicle } from './chronicle.js';
 
 export function setWorld(w) {
   const first = !app.world;
-  app.world = w;
+  app.world = w; app.version++;
   if (first) { app.worldAt = performance.now(); renderChronicle(); $('veil').style.opacity = 0; }
 }

@@ -36,6 +36,7 @@ export async function loopServer() {
       if (my !== gen) return;
       lastMsgAt = Date.now();
       const m = JSON.parse(ev.data);
+      if (m.t !== 'tick' && m.t !== 'online' && m.t !== 'chronicle') app.version++;
       switch (m.t) {
         case 'hello': engineReady = ensureEngine(m.engine).catch(() => {}); app.link = 'ok'; app.online = m.online; setWorld(S.unpackSnapshot(m.world)); peers.clear(); for (const p of m.peers) peers.set(p.sigil, { region: p.region, step: p.step, agents: [], at: Date.now() }); if (firstHello) { const f = firstHello; firstHello = null; f(); } break;
         case 'world': setWorld(S.unpackSnapshot(m.world)); break;

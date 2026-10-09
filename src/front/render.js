@@ -14,7 +14,8 @@ import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS } from './co
 
 export const hue = lin => app.world?.lineages[lin]?.hue ?? 0;
 let last = performance.now(), frames = 0, fpsAt = last, hits = [], lowStreak = 0;
-let drawnAt = 0;
+let drawnAt = 0, lastSig = '', lastData = '', dataDrawnAt = 0;
+const WALLPAPER_DATA_MS = 1000;
 function frame(now) {
   // wallpaper mode: the next frame is requested only when due — no 60 Hz wake-ups between drawn frames
   if (WALLPAPER) setTimeout(() => requestAnimationFrame(frame), Math.max(0, 1000 / WALLPAPER.fps - (performance.now() - now)));
@@ -49,6 +50,15 @@ function frame(now) {
     }
   }
   layout();
+  // wallpaper mode: nothing is drawn unless something visible changed (camera, world, witnesses, size)
+  // (the camera at the frame rate; data changes — other witnesses' progress above all — at most once a second)
+  if (WALLPAPER) {
+    const camSig = `${cam.lon.toFixed(4)}|${cam.lat.toFixed(4)}|${view.R.toFixed(1)}|${gcv.width}x${gcv.height}`;
+    const dataSig = `${app.version}|${peers.size}|${!!app.lease}`;
+    const camMoved = camSig !== lastSig, dataMoved = dataSig !== lastData;
+    if (!camMoved && (!dataMoved || now - dataDrawnAt < WALLPAPER_DATA_MS)) return;
+    lastSig = camSig; lastData = dataSig; dataDrawnAt = now;
+  }
 
   gl.viewport(0, 0, gcv.width, gcv.height);
   drawGlobe(view.cw * view.dpr, view.ch * view.dpr, view.cx * view.dpr, view.cy * view.dpr, view.R * view.dpr);
@@ -63,7 +73,7 @@ function frame(now) {
     const rx = reg % RX, ry = Math.floor(reg / RX);
     const x0 = rx * RW, y0 = ry * RH, x1 = x0 + RW, y1 = y0 + RH;
     const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
-    octx.strokeStyle = color; octx.lineWidth = 1; octx.setLineDash(dash); octx.lineDashOffset = -now / 40;
+    octx.strokeStyle = color; octx.lineWidth = 1; octx.setLineDash(dash); octx.lineDashOffset = WALLPAPER ? 0 : -now / 40;   // marching dashes, except as a wallpaper
     octx.beginPath();
     for (let i = 0; i < 4; i++) {
       const [ax, ay] = corners[i], [bx, by] = corners[i + 1], pts = [];
@@ -138,7 +148,7 @@ function frame(now) {
 
   // memories: recent events
   const tm = Date.now();
-  for (const e of app.world.chronicle.slice(-12)) if (e.x != null && tm - e.t < MEMORY_MS) {
+  if (!WALLPAPER) for (const e of app.world.chronicle.slice(-12)) if (e.x != null && tm - e.t < MEMORY_MS) {   // (animated: not on a wallpaper)
     const p = project(e.x, e.y, o); if (!p) continue;
     const k = 1 - (tm - e.t) / MEMORY_MS;
     octx.strokeStyle = `hsla(${hue(e.lin)},60%,66%,${k * .5})`; octx.lineWidth = .8;

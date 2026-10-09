@@ -163,8 +163,9 @@ their name.
 ### Wallpaper mode
 
 `https://drakar.tech/?wallpaper` — for a live desktop wallpaper (e.g. [Lively](https://github.com/rocksdanister/lively)
-on Windows): only the globe, the brand and the era; no interaction; frames drawn at most 15 times a second
-(`&fps=`), requested by timer rather than at the screen's refresh rate; density capped at 1.5× (`&dpr=`); the
+on Windows): only the globe, the brand and the era; no interaction; nothing redrawn unless something visible
+changed — the camera (at most 10 frames a second, `&fps=`, requested by timer rather than at the screen's
+refresh rate) or the world and the other witnesses (at most once a second); no animated dashes or rings; density capped at 1.5× (`&dpr=`); the
 camera follows the active region at once; one unit a minute (every five minutes on battery). Measured in
 Chromium: main-thread time from ~40–55 % to ~1 %.
 
