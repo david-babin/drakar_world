@@ -2,6 +2,7 @@
 import { W, H, RX, RW, RH, lonOf, latOf } from '../lib/index.js';
 import { gcv, ocv } from './dom.js';
 import { DEG, MAX_DPR, LAT_LIMIT } from './constants.js';
+import { WALLPAPER } from './state.js';
 
 export const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
 export const regionCenter = reg => ({ lon: (((reg % RX) + .5) * RW / W * 360 - 180) * DEG, lat: (90 - (Math.floor(reg / RX) + .5) * RH / H * 180) * DEG });
@@ -11,7 +12,7 @@ export const regionCenter = reg => ({ lon: (((reg % RX) + .5) * RW / W * 360 - 1
 export const view = { dpr: 1, cw: 0, ch: 0, R: 0, cx: 0, cy: 0, quality: 1 };
 export function resize() {
   view.cw = innerWidth; view.ch = innerHeight;
-  const want = Math.min(MAX_DPR, devicePixelRatio || 1) * view.quality;
+  const want = Math.min(WALLPAPER ? WALLPAPER.dpr : MAX_DPR, devicePixelRatio || 1) * view.quality;
   const bw = Math.max(1, Math.round(view.cw * want)), bh = Math.max(1, Math.round(view.ch * want));
   if (gcv.width !== bw || gcv.height !== bh) { gcv.width = ocv.width = bw; gcv.height = ocv.height = bh; }
   view.dpr = bw / view.cw;
@@ -20,7 +21,7 @@ addEventListener('resize', resize); resize();
 matchMedia?.(`(resolution: ${devicePixelRatio}dppx)`).addEventListener?.('change', resize);   // moved to another screen
 export function layout() {
   view.R = Math.min(view.cw, view.ch) * 0.42 * cam.zoom;
-  view.cx = view.cw > 900 ? view.cw * 0.46 : view.cw / 2; view.cy = view.ch / 2;
+  view.cx = view.cw > 900 && !WALLPAPER ? view.cw * 0.46 : view.cw / 2; view.cy = view.ch / 2;
 }
 // orthographic projection: grid → screen; returns null on the far side
 const sinLat = new Float64Array(H), cosLat = new Float64Array(H);

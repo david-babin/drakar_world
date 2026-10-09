@@ -1,6 +1,6 @@
 // The witness. Nothing explains the page. After five seconds the witness block invites with a halo; on contact, a whisper.
 import { ROMAN } from '../lib/index.js';
-import { app } from './state.js';
+import { app, WALLPAPER } from './state.js';
 import { witness, whisper } from './dom.js';
 import { ME } from './identity.js';
 import { tele } from './telemetry.js';
@@ -9,7 +9,7 @@ import { INVITE_AFTER_MS, WHISPER_MS } from './constants.js';
 
 // Nothing explains the page. After five seconds the witness block invites with a halo; on contact, a whisper.
 let whisperTimer = null, whispered = 0;
-const inviteTimer = setTimeout(() => witness.classList.add('invite'), INVITE_AFTER_MS);
+const inviteTimer = WALLPAPER ? 0 : setTimeout(() => witness.classList.add('invite'), INVITE_AFTER_MS);
 witness.addEventListener('click', () => {
   clearTimeout(inviteTimer); witness.classList.remove('invite');
   const lines = L().whispers || [];

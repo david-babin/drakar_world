@@ -1,6 +1,6 @@
 // Connected mode: the shared world over the WebSocket, with recovery after sleep or network loss.
 import * as S from '../lib/index.js';
-import { app, peers } from './state.js';
+import { app, peers, WALLPAPER } from './state.js';
 import { ME } from './identity.js';
 import { tele } from './telemetry.js';
 import { loadAssets } from './earth.js';
@@ -105,7 +105,7 @@ export async function loopServer() {
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send(prog(step, agents)));
       app.lease = null;
-      await sleep(NET.pauseMin + Math.random() * NET.pauseJitter);
+      await sleep(WALLPAPER ? (tele.batt && !tele.batt.charging ? NET.wallpaperBatteryPauseMs : NET.wallpaperPauseMs) : NET.pauseMin + Math.random() * NET.pauseJitter);
     } catch (e) { app.lease = null; await sleep(NET.errorRetryMs); }
   }
 }

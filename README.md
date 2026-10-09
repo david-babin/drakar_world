@@ -160,6 +160,14 @@ the witness block (composited CSS animation, `opacity` + `transform` only, no CP
 three-second whisper — and, once only, what the page does with the machine. On hover, only settlements give
 their name.
 
+### Wallpaper mode
+
+`https://drakar.tech/?wallpaper` — for a live desktop wallpaper (e.g. [Lively](https://github.com/rocksdanister/lively)
+on Windows): only the globe, the brand and the era; no interaction; frames drawn at most 15 times a second
+(`&fps=`), requested by timer rather than at the screen's refresh rate; density capped at 1.5× (`&dpr=`); the
+camera follows the active region at once; one unit a minute (every five minutes on battery). Measured in
+Chromium: main-thread time from ~40–55 % to ~1 %.
+
 ### Recovery after sleep / network loss
 
 The server sends a heartbeat every 20 s. Client side, 45 s without a message = dead connection: forced close,

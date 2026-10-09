@@ -44,6 +44,8 @@ export const NET = {
   askTimeoutMs: 20000,                     // a lease or result unanswered this long: reconnect
   noUnitRetryMs: 4000, errorRetryMs: 5000,
   pauseMin: 900, pauseJitter: 1500,        // pause between two units
+  wallpaperPauseMs: 60000,                 // wallpaper mode: one unit a minute
+  wallpaperBatteryPauseMs: 300000,         // … every five minutes on battery
 };
 
 // demo mode: a simulated past

@@ -3,10 +3,12 @@ import { gcv, tip } from './dom.js';
 import { cam, view, clampLat } from './camera.js';
 import { hoverAt } from './render.js';
 import { ZOOM_MIN, ZOOM_MAX } from './constants.js';
+import { WALLPAPER } from './state.js';
 
 const ptrs = new Map();                        // active pointers (mouse, fingers)
 export const gesture = { drag: null, pinch: null };      // one finger / mouse: rotate · two fingers: zoom
 const zoomTo = z => { cam.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); cam.idle = 0; };
+if (!WALLPAPER) {
 gcv.addEventListener('pointerdown', e => {
   gcv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   cam.vlon = cam.vlat = 0; cam.idle = 0;
@@ -30,3 +32,4 @@ addEventListener('wheel', e => { e.preventDefault(); zoomTo(cam.zoom * Math.exp(
 addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault(); });
 addEventListener('gesturestart', e => e.preventDefault());
 gcv.addEventListener('mouseleave', () => tip.style.display = 'none');
+}

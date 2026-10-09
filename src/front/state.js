@@ -8,4 +8,8 @@ export const app = {
   worldAt: Infinity, // when the first world arrived (performance.now)
 };
 export const peers = new Map();       // sigil → { region, step, agents: [[id,x,y,lin,pop]], at }
+// wallpaper mode (?wallpaper, e.g. in Lively): no text but the brand and the era, no interaction, a capped frame
+// rate and density, one unit now and then. ?fps= and ?dpr= override the caps.
+const Q = new URLSearchParams(location.search);
+export const WALLPAPER = Q.has('wallpaper') ? { fps: Math.max(5, Math.min(60, +Q.get('fps') || 15)), dpr: Math.max(1, Math.min(3, +Q.get('dpr') || 1.5)) } : null;
 export const DEMO = !!window.DRAKAR_DATA || !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');

@@ -54,3 +54,7 @@ html, body { overscroll-behavior: none; }
 #tip { position: fixed; pointer-events: none; padding: 6px 9px; background: rgba(7,9,12,.92); border: 1px solid var(--line); color: var(--ink); display: none; white-space: nowrap; }
 #tip small { color: var(--dim); display: block; }
 @media (max-width: 720px) { #chron { display: none; } #witness { padding-left: 12px; } #brand { font-size: 22px; } #era { top: 44px; } body { font-size: 10px; } #whisper p { font-size: 18px; } }
+/* wallpaper mode: the globe, the brand and the era only */
+body.wallpaper #witness, body.wallpaper #whisper, body.wallpaper #chron, body.wallpaper #status, body.wallpaper #version,
+body.wallpaper #lang, body.wallpaper #tip { display: none; }
+body.wallpaper #globe { cursor: default; }

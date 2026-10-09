@@ -1,7 +1,7 @@
 // Rendering loop: the GPU globe, then life on the 2D canvas (regions being computed, routes, settlements,
 // groups and settlement areas, recent events), then the HUD.
 import { W, H, RX, RW, RH, STEPS, lonOf, latOf } from '../lib/index.js';
-import { app, peers } from './state.js';
+import { app, peers, WALLPAPER } from './state.js';
 import { gcv, octx, tip } from './dom.js';
 import { cam, view, resize, layout, project, projectLL, geodesic, regionCenter, cameraMatrix, clampLat } from './camera.js';
 import { gl, drawGlobe, drawLines } from './gl/globe.js';
@@ -14,33 +14,38 @@ import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS } from './co
 
 export const hue = lin => app.world?.lineages[lin]?.hue ?? 0;
 let last = performance.now(), frames = 0, fpsAt = last, hits = [], lowStreak = 0;
+let drawnAt = 0;
 function frame(now) {
-  requestAnimationFrame(frame);
+  // wallpaper mode: the next frame is requested only when due — no 60 Hz wake-ups between drawn frames
+  if (WALLPAPER) setTimeout(() => requestAnimationFrame(frame), Math.max(0, 1000 / WALLPAPER.fps - (performance.now() - now)));
+  else requestAnimationFrame(frame);
   if (!app.world) return;
+  const k = drawnAt ? Math.min(4, (now - drawnAt) / 16.667) : 1;          // motion per 60 Hz frame: same speed at any rate
+  drawnAt = now;
   frames++;
   if (now - fpsAt > 2000) {
     tele.fps = Math.round(frames * 1000 / (now - fpsAt));
     // sustained low frame rate (two slow windows in a row, not during start-up, page visible):
     // lower the resolution a notch, never below 1×
-    lowStreak = document.visibilityState === 'visible' && now - app.worldAt > 6000 && tele.fps < 40 ? lowStreak + 1 : 0;
+    lowStreak = !WALLPAPER && document.visibilityState === 'visible' && now - app.worldAt > 6000 && tele.fps < 40 ? lowStreak + 1 : 0;
     if (lowStreak >= 2 && Math.min(MAX_DPR, devicePixelRatio || 1) * view.quality * 0.8 >= 1) { view.quality *= 0.8; lowStreak = 0; resize(); }
     frames = 0; fpsAt = now;
   }
   // inertia and slow rotation at rest
   if (!gesture.drag && !gesture.pinch) {
-    cam.lon += cam.vlon; cam.lat = clampLat(cam.lat + cam.vlat);
-    cam.vlon *= 0.92; cam.vlat *= 0.92;
-    cam.idle++;
+    cam.lon += cam.vlon * k; cam.lat = clampLat(cam.lat + cam.vlat * k);
+    cam.vlon *= 0.92 ** k; cam.vlat *= 0.92 ** k;
+    cam.idle += k;
     // after 6 s without interaction, the camera glides to the region being computed (mine, otherwise another witness's)
     if (cam.idle > IDLE_FRAMES) {
       let reg = app.lease ? app.lease.unit.region : null;
       if (reg == null) { let best = 0; for (const pr of peers.values()) if (pr.at > best) { best = pr.at; reg = pr.region; } }
       if (reg != null) cam.target = regionCenter(reg);
-      const ease = Math.min(0.012, (cam.idle - IDLE_FRAMES) / 20000);
+      const ease = Math.min(0.012, (cam.idle - IDLE_FRAMES) / 20000) * k;
       if (cam.target) {
         let dl = cam.target.lon - cam.lon; dl = Math.atan2(Math.sin(dl), Math.cos(dl));
         cam.lon += dl * ease; cam.lat += (clampLat(cam.target.lat) - cam.lat) * ease;
-      } else cam.lon += 0.00035 * Math.min(1, (cam.idle - IDLE_FRAMES) / 300);
+      } else cam.lon += 0.00035 * k * Math.min(1, (cam.idle - IDLE_FRAMES) / 300);
     }
   }
   layout();
