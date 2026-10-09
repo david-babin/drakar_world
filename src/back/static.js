@@ -7,13 +7,16 @@ import zlib from 'node:zlib';
 import { MIME, PRECOMPRESSED, DAY_CACHED, IMMUTABLE } from './constants.js';
 import { fingerprint } from './fingerprint.js';
 
-export function createStatic(dir, { dev = false } = {}) {
+export function createStatic(dir, { dev = false, commit = null } = {}) {
   const files = new Map();
   function load(rel) {
     const file = path.join(dir, rel);
     if (!file.startsWith(dir + path.sep)) return null;
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return null;
-    const raw = fs.readFileSync(file), ext = path.extname(file), squeeze = PRECOMPRESSED(ext);
+    let raw = fs.readFileSync(file);
+    const ext = path.extname(file), squeeze = PRECOMPRESSED(ext);
+    // the commit shown on the page: written by the build, or given at runtime when the build could not know it
+    if (rel === 'index.html' && commit) raw = Buffer.from(raw.toString('utf8').replace(/(<div id="version" class="hud">)[^<]*/, (_, open) => open + commit));
     const entry = {
       raw, type: MIME[ext] || 'application/octet-stream', etag: '"' + fingerprint(raw) + '"',
       cache: DAY_CACHED.includes(ext) ? 'public, max-age=86400' : 'no-cache',      // otherwise always revalidated (cheap 304)

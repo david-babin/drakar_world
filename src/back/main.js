@@ -33,7 +33,7 @@ setInterval(save, SAVE_MS).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { save(true); market.stop(); store.close(); process.exit(0); });
 
 // ---------- HTTP: read API + static files ----------
-const statics = createStatic(config.publicDir, { dev: config.dev });
+const statics = createStatic(config.publicDir, { dev: config.dev, commit: config.commit });
 console.log('static: ' + statics.summary());
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
 const server = http.createServer((req, res) => {
