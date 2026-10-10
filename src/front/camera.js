@@ -20,7 +20,7 @@ export function resize() {
 addEventListener('resize', resize); resize();
 matchMedia?.(`(resolution: ${devicePixelRatio}dppx)`).addEventListener?.('change', resize);   // moved to another screen
 export function layout() {
-  view.R = Math.min(view.cw, view.ch) * (EMBED ? 0.49 : 0.42) * cam.zoom;   // embedded: the disc fills the frame
+  view.R = Math.min(view.cw, view.ch) * (EMBED ? 0.38 : 0.42) * cam.zoom;   // embedded: the disc and its halo fill the frame (the halo fades out by 1.3 R)
   view.cx = view.cw > 900 && !WALLPAPER ? view.cw * 0.46 : view.cw / 2; view.cy = view.ch / 2;
 }
 // orthographic projection: grid → screen; returns null on the far side
