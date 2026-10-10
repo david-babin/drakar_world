@@ -86,3 +86,5 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 body.wallpaper #witness, body.wallpaper #whisper, body.wallpaper #chron, body.wallpaper #status, body.wallpaper #version,
 body.wallpaper #lang, body.wallpaper #tip { display: none; }
 body.wallpaper #globe { cursor: default; }
+/* embed mode: nothing but the disc */
+body.embed #brand, body.embed #era { display: none; }

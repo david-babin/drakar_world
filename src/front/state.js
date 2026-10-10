@@ -13,4 +13,6 @@ export const peers = new Map();       // sigil → { region, step, agents: [[id,
 // rate and density, one unit now and then. ?fps= and ?dpr= override the caps.
 const Q = new URLSearchParams(location.search);
 export const WALLPAPER = Q.has('wallpaper') ? { fps: Math.max(2, Math.min(60, +Q.get('fps') || 10)), dpr: Math.max(1, Math.min(3, +Q.get('dpr') || 1.5)) } : null;
+// embed mode (?wallpaper&embed, the home page's hero): wallpaper mode with no text at all, the disc filling the frame
+export const EMBED = !!WALLPAPER && Q.has('embed');
 export const DEMO = !!window.DRAKAR_DATA || !location.protocol.startsWith('http') || new URLSearchParams(location.search).has('demo');

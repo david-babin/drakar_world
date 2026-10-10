@@ -1,5 +1,5 @@
 // drakar.tech — the page. Bundled by tools/build.mjs into public/app.js.
-import { app, DEMO, WALLPAPER } from './state.js';
+import { app, DEMO, WALLPAPER, EMBED } from './state.js';
 import { cam } from './camera.js';
 import { IDLE_FRAMES } from './constants.js';
 import { applyLang, onLangChange } from './i18n.js';
@@ -13,5 +13,6 @@ import { loopDemo } from './demo.js';
 
 onLangChange(() => { if (app.world) { renderChronicle(); hud(); } });
 applyLang();
-if (WALLPAPER) { document.body.classList.add('wallpaper'); cam.idle = IDLE_FRAMES; }   // no waiting: the camera follows the active region at once
+if (WALLPAPER) { document.body.classList.add('wallpaper'); cam.idle = IDLE_FRAMES; }
+if (EMBED) document.body.classList.add('embed');   // no waiting: the camera follows the active region at once
 (DEMO ? loopDemo : loopServer)();

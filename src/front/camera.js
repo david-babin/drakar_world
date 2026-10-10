@@ -2,7 +2,7 @@
 import { W, H, RX, RW, RH, lonOf, latOf } from '../lib/index.js';
 import { gcv, ocv } from './dom.js';
 import { DEG, MAX_DPR, LAT_LIMIT } from './constants.js';
-import { WALLPAPER } from './state.js';
+import { WALLPAPER, EMBED } from './state.js';
 
 export const cam = { lon: 20 * DEG, lat: 18 * DEG, zoom: 1, vlon: 0, vlat: 0, idle: 0, target: null };
 export const regionCenter = reg => ({ lon: (((reg % RX) + .5) * RW / W * 360 - 180) * DEG, lat: (90 - (Math.floor(reg / RX) + .5) * RH / H * 180) * DEG });
@@ -20,7 +20,7 @@ export function resize() {
 addEventListener('resize', resize); resize();
 matchMedia?.(`(resolution: ${devicePixelRatio}dppx)`).addEventListener?.('change', resize);   // moved to another screen
 export function layout() {
-  view.R = Math.min(view.cw, view.ch) * 0.42 * cam.zoom;
+  view.R = Math.min(view.cw, view.ch) * (EMBED ? 0.49 : 0.42) * cam.zoom;   // embedded: the disc fills the frame
   view.cx = view.cw > 900 && !WALLPAPER ? view.cw * 0.46 : view.cw / 2; view.cy = view.ch / 2;
 }
 // orthographic projection: grid → screen; returns null on the far side
