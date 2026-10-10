@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { World, loadTerrain, packEntry, regimeOf } from '../lib/index.js';
 import { config } from './config.js';
-import { SAVE_MS, SNAPSHOT_MS, RECENT_UNITS, ENGINE_FILE } from './constants.js';
+import { SAVE_MS, SNAPSHOT_MS, RECENT_UNITS, ENGINE_FILE, CORS_ORIGINS } from './constants.js';
 import { openDatabase } from './db.js';
 import { createStatic } from './static.js';
 import { createVisitors } from './visitors.js';
@@ -39,6 +39,12 @@ const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
+    if (url.pathname.startsWith('/api/')) {
+      if (CORS_ORIGINS.has(req.headers.origin)) res.setHeader('access-control-allow-origin', req.headers.origin);
+      res.setHeader('vary', 'Origin');
+      if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-methods': 'GET', 'access-control-max-age': '86400' }); return res.end(); }
+    }
+    if (url.pathname === '/api/summary') return json(res, 200, { market: market.current && { symbol: market.symbol, close: market.current.close, change: market.current.change, live: !!market.current.live }, climate: world.climate, online: visitors.online, totals: world.s.totals, contributors: Object.keys(world.s.contributors).length });
     if (url.pathname === '/api/world') return json(res, 200, world.snapshot(visitors.online));
     if (url.pathname === '/api/market') return json(res, 200, { symbol: market.symbol, current: market.current, climate: world.climate, history: market.history() });
     if (url.pathname === '/api/stats') return json(res, 200, { totals: world.s.totals, contributors: world.s.contributors, online: visitors.online, seq: world.seq, peers: visitors.peers(), ws: visitors.links(), last: store.recentUnits(RECENT_UNITS) });

@@ -18,6 +18,12 @@ export const PROGRESS_MAX = 512;               // groups relayed per progress me
 export const SIGIL_RE = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const RECENT_UNITS = 20;                // units listed by /api/stats
 
+// read API: pages allowed to call it from the browser (the home page's live figures, local previews)
+export const CORS_ORIGINS = new Set([
+  'https://drakar.tech', 'https://www.drakar.tech', 'https://home.drakar.tech',
+  'http://localhost:8080', 'http://localhost:8081',
+]);
+
 // static files
 export const MIME = {
   '.webmanifest': 'application/manifest+json', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

@@ -88,7 +88,7 @@ rendered client-side in the visitor's language; lineage names are translated by 
   19 brotli), `base.png` (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings,
   84 kB), `coasts.bin` (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines
   in zigzag-varint deltas.
-- **Server** (`src/back/`): static files + read API (`/api/world`, `/api/market`, `/api/stats`), WebSocket `/ws`
+- **Server** (`src/back/`): static files + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), WebSocket `/ws`
   for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log).
 - **Market** (`src/back/market/`): the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking
   the S&P 500, the index itself being paid data) over REST at startup and every 10 min, then **live trades over
