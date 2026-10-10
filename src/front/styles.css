@@ -1,60 +1,88 @@
-/* drakar.tech — the page. Inlined into index.html by the build. */
+/* drakar.tech — the page. Inlined into index.html by the build.
+   Charte graphique drakar, theme "nuit": tokens below, 4 px grid, no gradient, no shadow.
+   Brass is rare: the wordmark dot, the region being computed (box and bar). Slate carries the data. */
 :root {
-  --bg: #07090c; --ink: #c9c2b2; --dim: #6c6a60; --soft: #9c978a; --faint: #3a3d3f; --line: #1d2429; --accent: #d9a85c;
-  --mono: 'IBM Plex Mono', ui-monospace, monospace; --serif: 'Cormorant Garamond', Georgia, serif;
+  --surface-100: #07090c; --surface-200: #0f1319; --surface-300: #171d25;
+  --ink: #ecebe6; --ink-muted: #9aa3ad; --hairline: #232a33; --hairline-strong: #5e6b7a;
+  --marine-text: #a9bddc; --brass: #d4a53a; --slate: #8aa3b4; --success: #6fbb8d; --danger: #e5796c; --focus: #a9bddc;
+  --font-display: 'Inter Tight', 'Manrope', system-ui, sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 16px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
-body { font-family: var(--mono); font-weight: 300; font-size: 11px; letter-spacing: .02em; }
+html, body { height: 100%; background: var(--surface-100); color: var(--ink); overflow: hidden; overscroll-behavior: none; }
+body { font: 400 14px/22px var(--font-sans); -webkit-font-smoothing: antialiased; }
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #globe { cursor: grab; touch-action: none; } #globe.drag { cursor: grabbing; }
-html, body { overscroll-behavior: none; }
 #over { pointer-events: none; }
-#veil { position: fixed; inset: 0; background: var(--bg); pointer-events: none; transition: opacity 2.4s ease; }
-.hud { position: fixed; pointer-events: none; color: var(--dim); line-height: 1.7; }
-.hud b { color: var(--ink); font-weight: 400; }
-.hud i { color: var(--accent); font-style: normal; }
-.hud i.dn { color: #7fa3c4; }
-#brand { left: 20px; top: 12px; font-family: var(--serif); font-size: 26px; line-height: 1.3; letter-spacing: .14em; color: var(--ink); font-weight: 400; white-space: nowrap; }
-#lang { pointer-events: auto; margin-left: 12px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; vertical-align: middle; }
-#lang a { color: var(--dim); cursor: pointer; text-decoration: none; transition: color .3s; }
-#lang a:hover { color: var(--soft); } #lang a.on { color: var(--soft); }
-#era { left: 20px; top: 50px; font-family: var(--serif); font-size: 15px; letter-spacing: .08em; color: var(--ink); }
-/* the witness: code name, index, climate — one clickable block that invites with a composited halo (opacity + transform) */
-#witness { position: fixed; right: 20px; top: 16px; text-align: right; line-height: 1.7; color: var(--dim); cursor: pointer; user-select: none; padding: 4px 0 4px 24px; z-index: 2; }
-#witness b { color: var(--ink); font-weight: 400; } #witness i { color: var(--accent); font-style: normal; } #witness i.dn { color: #7fa3c4; }
-#witness .sg { letter-spacing: .14em; color: var(--dim); transition: color .4s; }
+#veil { position: fixed; inset: 0; background: var(--surface-100); pointer-events: none; transition: opacity 2.4s ease; }
+
+/* type roles */
+.hud { position: fixed; pointer-events: none; color: var(--ink-muted); }
+.cap { font: 600 12px/16px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+.num { font: 500 14px/20px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.num + .num { margin-left: 8px; }
+.up { color: var(--success); } .dn { color: var(--danger); }
+.hud b, #witness b { font-weight: 600; color: var(--ink); }
+
+/* wordmark: drakar + brass dot, then "tech" in ink-muted */
+#brand { left: 24px; top: 20px; display: flex; align-items: center; white-space: nowrap; }
+.wordmark { display: inline-flex; align-items: baseline; font: 800 22px/28px var(--font-display); letter-spacing: -.03em; color: var(--ink); }
+.wordmark .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--brass); margin: 0 2px 0 3px; }
+.wordmark .tld { color: var(--ink-muted); }
+#lang { pointer-events: auto; margin-left: 16px; display: inline-flex; gap: 8px; }
+#lang a { font: 600 12px/16px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--hairline-strong); cursor: pointer; text-decoration: none; transition: color .2s; }
+#lang a:hover, #lang a.on { color: var(--ink); }
+#lang a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+#era { left: 24px; top: 52px; font: 500 14px/20px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--slate); }
+
+/* the witness: code name, index, climate. After a while its outline breathes (opacity only) to invite a click */
+#witness { position: fixed; right: 16px; top: 12px; text-align: right; cursor: pointer; user-select: none; padding: 8px 12px; z-index: 2;
+  border: 1px solid transparent; border-radius: var(--radius-md); transition: background .2s; }
+#witness > div { line-height: 24px; }
+#witness .sg { font: 500 14px/24px var(--font-mono); letter-spacing: .04em; color: var(--ink-muted); transition: color .2s; }
+#witness:hover { background: var(--surface-200); }
 #witness:hover .sg, #witness.invite .sg { color: var(--ink); }
-#witness::before { content: ''; position: absolute; inset: -22px -40px -18px -30px; border-radius: 50%; z-index: -1; pointer-events: none;
-  background: radial-gradient(ellipse at center, rgba(217,168,92,.30) 0%, rgba(217,168,92,.10) 40%, rgba(217,168,92,0) 70%);
-  opacity: 0; transform: scale(.75); will-change: opacity, transform; }
-#witness.invite::before { animation: bloom 4.2s ease-in-out infinite; }
-#witness::after { content: ''; position: absolute; right: 0; bottom: -2px; height: 1px; width: 0; background: var(--accent); opacity: 0; }
-#witness.invite::after { animation: cue 4.2s ease-in-out infinite; }
-@keyframes bloom { 0%, 100% { opacity: 0; transform: scale(.75); } 50% { opacity: 1; transform: scale(1); } }
-@keyframes cue { 0%, 100% { width: 0; opacity: 0; } 50% { width: 100%; opacity: .8; } }
-@media (prefers-reduced-motion: reduce) { #witness.invite::before, #witness.invite::after { animation: none; } #witness.invite::before { opacity: .6; transform: none; } }
-#whisper { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; opacity: 0; transition: opacity .9s ease; max-width: 520px; padding: 0 24px; z-index: 3; }
-#whisper.on { opacity: 1; transition: opacity .35s ease; }
-#whisper::before { content: ''; position: absolute; inset: -60px -120px; background: radial-gradient(ellipse at center, rgba(7,9,12,.82) 0%, rgba(7,9,12,.55) 45%, rgba(7,9,12,0) 72%); z-index: -1; }
-#whisper p { font-family: var(--serif); font-size: 22px; line-height: 1.35; color: var(--ink); letter-spacing: .02em; text-shadow: 0 0 24px rgba(7,9,12,.9), 0 0 6px rgba(7,9,12,1); }
-#whisper small { display: block; margin-top: 14px; font-family: var(--mono); font-size: 10px; letter-spacing: .14em; color: var(--dim); }
-#whisper b { color: var(--accent); font-weight: 400; }
-#chron { right: 20px; bottom: 16px; width: 260px; max-height: 26vh; overflow: hidden; text-align: right; color: var(--soft); opacity: .9;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%); mask-image: linear-gradient(to bottom, transparent, #000 35%); }
-#chron div { padding: 1px 0; }
-#chron div.new { animation: rise 1.4s ease both; }
-#chron em { color: var(--dim); font-style: normal; margin-left: 8px; }
-#chron span.yr { color: var(--ink); margin-right: 8px; }
-@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-#status { left: 20px; bottom: 34px; color: var(--soft); }
-#version { left: 20px; bottom: 14px; font-size: 10px; letter-spacing: .12em; color: var(--dim); }
-#status .bar { display: inline-block; width: 120px; height: 2px; background: var(--line); vertical-align: middle; margin-left: 8px; }
-#status .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .12s linear; }
-#tip { position: fixed; pointer-events: none; padding: 6px 9px; background: rgba(7,9,12,.92); border: 1px solid var(--line); color: var(--ink); display: none; white-space: nowrap; }
-#tip small { color: var(--dim); display: block; }
-@media (max-width: 720px) { #chron { display: none; } #witness { padding-left: 12px; } #brand { font-size: 22px; } #era { top: 44px; } body { font-size: 10px; } #whisper p { font-size: 18px; } }
-/* wallpaper mode: the globe, the brand and the era only */
+#witness .cap { margin-right: 8px; }
+#witness::after { content: ''; position: absolute; inset: -1px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md); opacity: 0; pointer-events: none; will-change: opacity; }
+#witness.invite::after { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #witness.invite::after { animation: none; opacity: 1; } }
+
+/* the whisper: a card in the middle */
+#whisper { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; opacity: 0; transition: opacity .6s ease;
+  width: min(480px, calc(100vw - 32px)); padding: 24px; background: var(--surface-200); border: 1px solid var(--hairline); border-radius: var(--radius-lg); z-index: 3; }
+#whisper.on { opacity: .96; transition: opacity .3s ease; }
+#whisper p { font: 600 20px/28px var(--font-sans); color: var(--ink); }
+#whisper p b { font: 500 18px/28px var(--font-mono); color: var(--ink); }
+#whisper small { display: block; margin-top: 16px; font: 400 13px/20px var(--font-mono); color: var(--slate); }
+
+/* the chronicle: newest at the bottom, older lines fade by steps */
+#chron { right: 24px; bottom: 16px; width: 360px; max-height: 26vh; overflow: hidden; text-align: right; display: flex; flex-direction: column; justify-content: flex-end; }
+#chron div { font: 400 12px/18px var(--font-sans); color: var(--ink-muted); padding: 1px 0; }
+#chron div:nth-last-child(n+8) { opacity: .7; } #chron div:nth-last-child(n+11) { opacity: .4; }
+#chron div.new { animation: rise 1.2s ease both; }
+#chron span.yr { font: 500 12px/18px var(--font-mono); color: var(--slate); margin-right: 8px; }
+#chron em { font: 400 12px/18px var(--font-mono); color: var(--hairline-strong); font-style: normal; margin-left: 8px; white-space: nowrap; }
+#chron span.yr { white-space: nowrap; }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+#status { left: 24px; bottom: 40px; display: flex; align-items: center; gap: 8px; font: 600 12px/16px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted); }
+#status .num { letter-spacing: 0; }
+#status .bar { display: inline-block; width: 120px; height: 2px; background: var(--hairline); border-radius: 1px; overflow: hidden; }
+#status .bar i { display: block; height: 100%; background: var(--brass); width: 0; transition: width .12s linear; }
+#version { left: 24px; bottom: 16px; font: 400 12px/16px var(--font-mono); color: var(--slate); }
+
+#tip { position: fixed; pointer-events: none; padding: 8px 12px; background: var(--surface-200); border: 1px solid var(--hairline); border-radius: var(--radius-md); display: none; white-space: nowrap;
+  font: 600 14px/20px var(--font-sans); color: var(--ink); }
+#tip small { display: block; font: 400 12px/16px var(--font-mono); color: var(--slate); }
+
+@media (max-width: 720px) {
+  #chron { display: none; } #brand { left: 16px; top: 16px; } #era { left: 16px; top: 48px; } #status, #version { left: 16px; }
+  #witness { right: 8px; top: 8px; } #witness .cap { display: none; }
+}
+/* wallpaper mode: the globe, the wordmark and the era only */
 body.wallpaper #witness, body.wallpaper #whisper, body.wallpaper #chron, body.wallpaper #status, body.wallpaper #version,
 body.wallpaper #lang, body.wallpaper #tip { display: none; }
 body.wallpaper #globe { cursor: default; }

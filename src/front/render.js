@@ -10,12 +10,15 @@ import { tele } from './telemetry.js';
 import { hud } from './hud.js';
 import { urbanAreas } from './urban.js';
 import { t, fmt } from './i18n.js';
-import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS } from './constants.js';
+import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS, COLORS, FONTS, LINEAGE_SL } from './constants.js';
 
 export const hue = lin => app.world?.lineages[lin]?.hue ?? 0;
+// a lineage keeps its hue, muted to sit with the charte (low saturation, light)
+const lineageColor = (lin, a) => `hsla(${hue(lin)},${LINEAGE_SL},${a})`;
 let last = performance.now(), frames = 0, fpsAt = last, hits = [], lowStreak = 0;
 let drawnAt = 0, lastSig = '', lastData = '', dataDrawnAt = 0;
 const WALLPAPER_DATA_MS = 1000;
+document.fonts?.ready.then(() => { lastSig = ''; });   // labels are drawn with the web fonts: redraw once they are in
 function frame(now) {
   // wallpaper mode: the next frame is requested only when due — no 60 Hz wake-ups between drawn frames
   if (WALLPAPER) setTimeout(() => requestAnimationFrame(frame), Math.max(0, 1000 / WALLPAPER.fps - (performance.now() - now)));
@@ -85,12 +88,12 @@ function frame(now) {
   const tnow = Date.now();
   for (const [sg, pr] of peers) if (tnow - pr.at > PEER_TTL) peers.delete(sg);
   for (const [sg, pr] of peers) {
-    regionBox(pr.region, 'rgba(201,194,178,.26)', [2, 6]);
+    regionBox(pr.region, COLORS.peerBox, [2, 6]);
     const rx = pr.region % RX, ry = Math.floor(pr.region / RX);
     const c = projectLL(((rx + .5) * RW / W * 360 - 180) * DEG, (90 - (ry + .5) * RH / H * 180) * DEG, o);
-    if (c && c.c > 0.2) { octx.font = '300 9px IBM Plex Mono'; octx.fillStyle = `rgba(201,194,178,${0.5 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
+    if (c && c.c > 0.2) { octx.font = FONTS.data; octx.fillStyle = `rgba(${COLORS.slate},${0.8 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
   }
-  if (app.lease) regionBox(app.lease.unit.region, 'rgba(217,168,92,.6)', [3, 5]);
+  if (app.lease) regionBox(app.lease.unit.region, COLORS.ownBox, [3, 5]);
 
   // routes
   const byId = new Map(app.world.settlements.map(s => [s.id, s]));
@@ -98,7 +101,7 @@ function frame(now) {
   for (const r of app.world.routes) {
     const a = byId.get(r.a), b = byId.get(r.b); if (!a || !b) continue;
     const age = Math.min(1, (app.world.tick - r.tick) / 600);
-    octx.strokeStyle = `hsla(${hue(r.lin)},45%,70%,${0.18 + 0.3 * age})`;
+    octx.strokeStyle = age < 1 ? `rgba(${COLORS.brass},${0.65 - 0.35 * age})` : `rgba(${COLORS.slate},0.38)`;   // recent routes in brass, the others in slate
     octx.setLineDash(r.sea ? [2, 4] : []);
     octx.beginPath(); strokePath(geodesic(a.x, a.y, b.x, b.y, 48)); octx.stroke();
   }
@@ -109,10 +112,10 @@ function frame(now) {
   for (const st of app.world.settlements) {
     const p = project(st.x, st.y, o); if (!p) continue;
     const a = 0.35 + 0.65 * p.c;
-    octx.strokeStyle = `hsla(${hue(st.lin)},55%,62%,${a})`; octx.lineWidth = 1;
+    octx.strokeStyle = lineageColor(st.lin, a); octx.lineWidth = 1;
     octx.beginPath(); octx.rect(p.x - 2.5, p.y - 2.5, 5, 5); octx.stroke();
     octx.beginPath(); octx.moveTo(p.x, p.y - 2.5); octx.lineTo(p.x, p.y - 7); octx.stroke();
-    if (showLabels && p.c > 0.35) { octx.font = '300 9px IBM Plex Mono'; octx.fillStyle = `rgba(201,194,178,${0.55 * p.c})`; octx.textAlign = 'left'; octx.fillText(st.name, p.x + 6, p.y + 3); }
+    if (showLabels && p.c > 0.35) { octx.font = FONTS.label; octx.fillStyle = `rgba(${COLORS.inkMuted},${0.9 * p.c})`; octx.textAlign = 'left'; octx.fillText(st.name, p.x + 6, p.y + 3); }
     hits.push({ x: p.x, y: p.y, st });
   }
 
@@ -122,7 +125,7 @@ function frame(now) {
   const drawAgent = (a, alpha) => {
     const p = project(a.x, a.y, o); if (!p) return;
     const r = Math.min(4, 1 + Math.sqrt(a.pop) * .2) * (0.6 + 0.4 * p.c);
-    octx.fillStyle = `hsla(${hue(a.lin)},60%,66%,${alpha * (0.3 + 0.7 * p.c)})`;
+    octx.fillStyle = lineageColor(a.lin, alpha * (0.3 + 0.7 * p.c));
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
@@ -135,11 +138,11 @@ function frame(now) {
     if (!tier) { for (const a of c.members) drawAgent(a, .8); continue; }
     for (const a of c.members) drawAgent(a, .28);
     const p = projectLL(lonOf(c.x) * DEG, latOf(c.y) * DEG, o); if (!p) continue;
-    const k = 0.6 + 0.4 * p.c, al = 0.3 + 0.7 * p.c, col = `hsla(${hue(c.lin)},60%,68%,`;
+    const k = 0.6 + 0.4 * p.c, al = 0.3 + 0.7 * p.c, lin = c.lin;
     const r = (3.4 + 1.8 * Math.sqrt(tier)) * k;
-    octx.fillStyle = col + (.9 * al) + ')';
+    octx.fillStyle = lineageColor(lin, .9 * al);
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
-    octx.strokeStyle = col + (.35 * al) + ')'; octx.lineWidth = .8;
+    octx.strokeStyle = lineageColor(lin, .35 * al); octx.lineWidth = .8;
     for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(p.x, p.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
     hits.push({ x: p.x, y: p.y, ag: c.core });
   }
@@ -151,7 +154,7 @@ function frame(now) {
   if (!WALLPAPER) for (const e of app.world.chronicle.slice(-12)) if (e.x != null && tm - e.t < MEMORY_MS) {   // (animated: not on a wallpaper)
     const p = project(e.x, e.y, o); if (!p) continue;
     const k = 1 - (tm - e.t) / MEMORY_MS;
-    octx.strokeStyle = `hsla(${hue(e.lin)},60%,66%,${k * .5})`; octx.lineWidth = .8;
+    octx.strokeStyle = lineageColor(e.lin, k * .5); octx.lineWidth = .8;
     octx.beginPath(); octx.arc(p.x, p.y, 6 + (1 - k) * 18, 0, 6.283); octx.stroke();
   }
 

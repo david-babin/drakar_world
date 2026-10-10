@@ -6,11 +6,21 @@ export const STORAGE = { lang: 'drakar.lang', sigil: 'drakar.sigil' };   // loca
 export const MAX_DPR = 3;                  // native density up to 3× (phones are often 2.6–3×)
 export const MASK_MAX = 4096;              // land mask texture width (equirectangular, height = width / 2)
 export const LINE_CHUNK = 16000;           // segments per 16-bit index chunk
-export const LINE_INK = [0.79, 0.76, 0.70];
-export const CONTOUR_ALPHA = [0.10, 0.15, 0.20, 0.25, 0.30];   // 500 / 1000 / 2000 / 3000 / 4000 m
+export const LINE_INK = [0.925, 0.922, 0.902];   // charte: ink #ecebe6
+export const CONTOUR_ALPHA = [0.08, 0.12, 0.16, 0.20, 0.24];   // 500 / 1000 / 2000 / 3000 / 4000 m
 export const CONTOUR_WIDTH = 0.8;
-export const COAST_ALPHA = 0.55;
+export const COAST_ALPHA = 0.34;
 export const COAST_WIDTH = 1.2;
+// overlay colours (charte, theme nuit), as "r,g,b" for rgba() or full CSS colours
+export const COLORS = {
+  slate: '138,163,180',                   // #8aa3b4: data, older routes
+  brass: '212,165,58',                    // #d4a53a: what is active (recent routes, the region being computed)
+  inkMuted: '154,163,173',                // #9aa3ad: labels
+  peerBox: 'rgba(94,107,122,.7)',          // hairline-strong: another witness computing
+  ownBox: 'rgba(212,165,58,.75)',          // brass: this witness computing
+};
+export const FONTS = { label: '600 10px Manrope, system-ui, sans-serif', data: '500 10px "JetBrains Mono", ui-monospace, monospace' };
+export const LINEAGE_SL = '30%,72%';          // lineage colours: saturation and lightness (the hue is the lineage's)
 export const CITY_SOULS = 10000;           // each 10,000 souls of a settlement area makes a bigger point
 export const URBAN_LINK = 3;               // groups of one lineage within this many cells form one area
 export const MEMORY_MS = 20000;            // a recent event rings on the globe this long

@@ -8,11 +8,12 @@ varying vec2 v;
 uniform vec2 res; uniform vec2 center; uniform float R; uniform float lon0, lat0; uniform float climate;
 uniform sampler2D base; uniform sampler2D mask;
 const float PI = 3.14159265;
+// charte, theme nuit: surfaces and hairlines for the land, marine-tint for the shelf
 vec3 landCol(float t) {
-  if (t < 3.5) return vec3(0.118, 0.145, 0.157);     // plain (or unknown class at the edge)
-  if (t < 4.5) return vec3(0.150, 0.178, 0.185);     // hills
-  if (t < 5.5) return vec3(0.195, 0.222, 0.228);     // mountain
-  return vec3(0.135, 0.165, 0.19);                   // ice
+  if (t < 3.5) return vec3(0.137, 0.165, 0.200);     // plain (or unknown class at the edge): hairline #232a33
+  if (t < 4.5) return vec3(0.170, 0.198, 0.233);     // hills
+  if (t < 5.5) return vec3(0.215, 0.243, 0.278);     // mountain (towards hairline-strong)
+  return vec3(0.200, 0.232, 0.268);                  // ice
 }
 void main() {
   vec2 px = v * res * .5;
@@ -20,8 +21,9 @@ void main() {
   float d2 = dot(q, q);
   vec3 bg = vec3(0.027, 0.035, 0.047);
   float tint = climate;
-  vec3 glowC = tint >= 0. ? vec3(0.85, 0.66, 0.36) : vec3(0.50, 0.64, 0.77);
-  if (d2 > 1.0) { float d = sqrt(d2); float halo = exp(-(d - 1.0) * 14.0) * (0.10 + 0.10 * abs(tint)); gl_FragColor = vec4(bg + glowC * halo, 1.); return; }
+  // the climate, as a hairline ring around the globe: brass when the index rises, marine-text when it falls
+  vec3 ringC = tint >= 0. ? vec3(0.831, 0.647, 0.227) : vec3(0.663, 0.741, 0.863);
+  if (d2 > 1.0) { float d = (sqrt(d2) - 1.0) * R; float ring = 1.0 - smoothstep(0.6, 1.6, abs(d - 6.0)); gl_FragColor = vec4(mix(bg, ringC, ring * (0.12 + 0.5 * abs(tint))), 1.); return; }
   float z = sqrt(1.0 - d2);
   float cl0 = cos(lat0), sl0 = sin(lat0);
   float lat = asin(clamp(q.y * cl0 + z * sl0, -1., 1.));
@@ -30,16 +32,15 @@ void main() {
   float fv = floor(texture2D(base, uv).r * 255. + .5);
   float t = floor(fv / 32.), lvl = mod(fv, 32.) / 2.;
   float land = texture2D(mask, uv).r;                 // vector land, edges smoothed by filtering
-  vec3 sea = (t >= 1.5 || t == 1.) ? vec3(0.071, 0.118, 0.157) : vec3(0.047, 0.078, 0.106);   // continental shelf
+  vec3 sea = (t >= 1.5 || t == 1.) ? vec3(0.082, 0.125, 0.184) : vec3(0.059, 0.075, 0.098);   // continental shelf: marine-tint #15202f · deep sea: surface-200 #0f1319
   vec3 c = mix(sea, landCol(t + 1.) * (1.0 + lvl * 0.035), land);
   if (t > 4.5 && land > 0.5) c = landCol(6.);        // ice
   float gla = abs(fract(lat / PI * 12. + .5) - .5), glo = abs(fract(lon / PI * 12. + .5) - .5);
   float gw = 0.012 * (1.0 + 3.0 * (1.0 - z));
   float grat = (1.0 - smoothstep(0.0, gw, gla)) + (1.0 - smoothstep(0.0, gw, glo));
-  c += vec3(0.79, 0.76, 0.70) * grat * 0.045;
+  c += vec3(0.925, 0.922, 0.902) * grat * 0.035;
   float shade = 0.55 + 0.45 * pow(z, 0.6);
   c *= shade;
-  c += glowC * (0.05 * abs(tint)) * (1.0 - z);
   float aa = smoothstep(1.0, 1.0 - 2.0 / R, d2);
   gl_FragColor = vec4(mix(bg, c, aa), 1.);
 }`;
