@@ -1,7 +1,7 @@
 // Rendering loop: the GPU globe, then life on the 2D canvas (regions being computed, routes, settlements,
 // groups and settlement areas, recent events), then the HUD.
 import { W, H, RX, RW, RH, STEPS, lonOf, latOf } from '../lib/index.js';
-import { app, peers, WALLPAPER } from './state.js';
+import { app, peers, WALLPAPER, EMBED } from './state.js';
 import { gcv, octx, tip } from './dom.js';
 import { cam, view, resize, layout, project, projectLL, geodesic, regionCenter, cameraMatrix, clampLat } from './camera.js';
 import { gl, drawGlobe, drawLines } from './gl/globe.js';
@@ -91,7 +91,8 @@ function frame(now) {
     regionBox(pr.region, COLORS.peerBox, [2, 6]);
     const rx = pr.region % RX, ry = Math.floor(pr.region / RX);
     const c = projectLL(((rx + .5) * RW / W * 360 - 180) * DEG, (90 - (ry + .5) * RH / H * 180) * DEG, o);
-    if (c && c.c > 0.2) { octx.font = FONTS.data; octx.fillStyle = `rgba(${COLORS.slate},${0.8 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
+    if (!EMBED && c && c.c > 0.2) {   // embedded: no text on the globe
+      octx.font = FONTS.data; octx.fillStyle = `rgba(${COLORS.slate},${0.8 * c.c})`; octx.textAlign = 'center'; octx.fillText(`${sg} · ${(100 * pr.step / STEPS) | 0} %`, c.x, c.y); }
   }
   if (app.lease) regionBox(app.lease.unit.region, COLORS.ownBox, [3, 5]);
 
