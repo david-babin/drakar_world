@@ -21,9 +21,10 @@ void main() {
   float d2 = dot(q, q);
   vec3 bg = vec3(0.027, 0.035, 0.047);
   float tint = climate;
-  // the climate, as a hairline ring around the globe: brass when the index rises, marine-text when it falls
-  vec3 ringC = tint >= 0. ? vec3(0.831, 0.647, 0.227) : vec3(0.663, 0.741, 0.863);
-  if (d2 > 1.0) { float d = (sqrt(d2) - 1.0) * R; float ring = 1.0 - smoothstep(0.6, 1.6, abs(d - 6.0)); gl_FragColor = vec4(mix(bg, ringC, ring * (0.12 + 0.5 * abs(tint))), 1.); return; }
+  // the climate, as an atmosphere: a diffuse halo around the globe and a glow on its limb, brass when the index
+  // rises, marine-text when it falls (charte colours)
+  vec3 glowC = tint >= 0. ? vec3(0.831, 0.647, 0.227) : vec3(0.663, 0.741, 0.863);
+  if (d2 > 1.0) { float d = sqrt(d2); float halo = exp(-(d - 1.0) * 14.0) * (0.10 + 0.10 * abs(tint)); gl_FragColor = vec4(bg + glowC * halo, 1.); return; }
   float z = sqrt(1.0 - d2);
   float cl0 = cos(lat0), sl0 = sin(lat0);
   float lat = asin(clamp(q.y * cl0 + z * sl0, -1., 1.));
@@ -41,6 +42,7 @@ void main() {
   c += vec3(0.925, 0.922, 0.902) * grat * 0.035;
   float shade = 0.55 + 0.45 * pow(z, 0.6);
   c *= shade;
+  c += glowC * (0.05 * abs(tint)) * (1.0 - z);
   float aa = smoothstep(1.0, 1.0 - 2.0 / R, d2);
   gl_FragColor = vec4(mix(bg, c, aa), 1.);
 }`;
