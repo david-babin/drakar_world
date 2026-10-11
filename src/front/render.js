@@ -10,11 +10,11 @@ import { tele } from './telemetry.js';
 import { hud } from './hud.js';
 import { urbanAreas } from './urban.js';
 import { t, fmt } from './i18n.js';
-import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS, COLORS, FONTS, LINEAGE_SL } from './constants.js';
+import { DEG, PEER_TTL, MAX_DPR, CITY_SOULS, IDLE_FRAMES, MEMORY_MS, COLORS, FONTS, LINEAGE } from './constants.js';
 
 export const hue = lin => app.world?.lineages[lin]?.hue ?? 0;
-// a lineage keeps its hue, muted to sit with the charte (low saturation, light)
-const lineageColor = (lin, a) => `hsla(${hue(lin)},${LINEAGE_SL},${a})`;
+// a lineage keeps its hue, in the bright original palette (LINEAGE)
+const lineageColor = (lin, a, sl) => `hsla(${hue(lin)},${sl},${a})`;
 let last = performance.now(), frames = 0, fpsAt = last, hits = [], lowStreak = 0;
 let drawnAt = 0, lastSig = '', lastData = '', dataDrawnAt = 0;
 const WALLPAPER_DATA_MS = 1000;
@@ -102,7 +102,7 @@ function frame(now) {
   for (const r of app.world.routes) {
     const a = byId.get(r.a), b = byId.get(r.b); if (!a || !b) continue;
     const age = Math.min(1, (app.world.tick - r.tick) / 600);
-    octx.strokeStyle = age < 1 ? `rgba(${COLORS.brass},${0.65 - 0.35 * age})` : `rgba(${COLORS.slate},0.38)`;   // recent routes in brass, the others in slate
+    octx.strokeStyle = lineageColor(r.lin, 0.18 + 0.3 * age, LINEAGE.route);
     octx.setLineDash(r.sea ? [2, 4] : []);
     octx.beginPath(); strokePath(geodesic(a.x, a.y, b.x, b.y, 48)); octx.stroke();
   }
@@ -113,7 +113,7 @@ function frame(now) {
   for (const st of app.world.settlements) {
     const p = project(st.x, st.y, o); if (!p) continue;
     const a = 0.35 + 0.65 * p.c;
-    octx.strokeStyle = lineageColor(st.lin, a); octx.lineWidth = 1;
+    octx.strokeStyle = lineageColor(st.lin, a, LINEAGE.settlement); octx.lineWidth = 1;
     octx.beginPath(); octx.rect(p.x - 2.5, p.y - 2.5, 5, 5); octx.stroke();
     octx.beginPath(); octx.moveTo(p.x, p.y - 2.5); octx.lineTo(p.x, p.y - 7); octx.stroke();
     if (showLabels && p.c > 0.35) { octx.font = FONTS.label; octx.fillStyle = `rgba(${COLORS.inkMuted},${0.9 * p.c})`; octx.textAlign = 'left'; octx.fillText(st.name, p.x + 6, p.y + 3); }
@@ -126,7 +126,7 @@ function frame(now) {
   const drawAgent = (a, alpha) => {
     const p = project(a.x, a.y, o); if (!p) return;
     const r = Math.min(4, 1 + Math.sqrt(a.pop) * .2) * (0.6 + 0.4 * p.c);
-    octx.fillStyle = lineageColor(a.lin, alpha * (0.3 + 0.7 * p.c));
+    octx.fillStyle = lineageColor(a.lin, alpha * (0.3 + 0.7 * p.c), LINEAGE.group);
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
     hits.push({ x: p.x, y: p.y, ag: a });
   };
@@ -141,9 +141,9 @@ function frame(now) {
     const p = projectLL(lonOf(c.x) * DEG, latOf(c.y) * DEG, o); if (!p) continue;
     const k = 0.6 + 0.4 * p.c, al = 0.3 + 0.7 * p.c, lin = c.lin;
     const r = (3.4 + 1.8 * Math.sqrt(tier)) * k;
-    octx.fillStyle = lineageColor(lin, .9 * al);
+    octx.fillStyle = lineageColor(lin, .9 * al, LINEAGE.area);
     octx.beginPath(); octx.arc(p.x, p.y, r, 0, 6.283); octx.fill();
-    octx.strokeStyle = lineageColor(lin, .35 * al); octx.lineWidth = .8;
+    octx.strokeStyle = lineageColor(lin, .35 * al, LINEAGE.area); octx.lineWidth = .8;
     for (let i = 0, rings = Math.min(3, Math.ceil(Math.log2(tier + 1))); i < rings; i++) { octx.beginPath(); octx.arc(p.x, p.y, r + 2.5 + i * 2.5, 0, 6.283); octx.stroke(); }
     hits.push({ x: p.x, y: p.y, ag: c.core });
   }
@@ -155,7 +155,7 @@ function frame(now) {
   if (!WALLPAPER) for (const e of app.world.chronicle.slice(-12)) if (e.x != null && tm - e.t < MEMORY_MS) {   // (animated: not on a wallpaper)
     const p = project(e.x, e.y, o); if (!p) continue;
     const k = 1 - (tm - e.t) / MEMORY_MS;
-    octx.strokeStyle = lineageColor(e.lin, k * .5); octx.lineWidth = .8;
+    octx.strokeStyle = lineageColor(e.lin, k * .5, LINEAGE.event); octx.lineWidth = .8;
     octx.beginPath(); octx.arc(p.x, p.y, 6 + (1 - k) * 18, 0, 6.283); octx.stroke();
   }
 

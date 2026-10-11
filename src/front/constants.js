@@ -13,14 +13,15 @@ export const COAST_ALPHA = 0.34;
 export const COAST_WIDTH = 1.2;
 // overlay colours (charte, theme nuit), as "r,g,b" for rgba() or full CSS colours
 export const COLORS = {
-  slate: '138,163,180',                   // #8aa3b4: data, older routes
-  brass: '212,165,58',                    // #d4a53a: what is active (recent routes, the region being computed)
+  slate: '138,163,180',                   // #8aa3b4: data
   inkMuted: '154,163,173',                // #9aa3ad: labels
   peerBox: 'rgba(94,107,122,.7)',          // hairline-strong: another witness computing
   ownBox: 'rgba(212,165,58,.75)',          // brass: this witness computing
 };
 export const FONTS = { label: '600 10px Manrope, system-ui, sans-serif', data: '500 10px "JetBrains Mono", ui-monospace, monospace' };
-export const LINEAGE_SL = '30%,72%';          // lineage colours: saturation and lightness (the hue is the lineage's)
+// lineage colours, saturation and lightness (the hue is the lineage's): the project's original bright palette,
+// kept apart from the charte so that the civilisations stand out on the globe
+export const LINEAGE = { route: '45%,70%', settlement: '55%,62%', group: '60%,66%', area: '60%,68%', event: '60%,66%' };
 export const CITY_SOULS = 10000;           // each 10,000 souls of a settlement area makes a bigger point
 export const URBAN_LINK = 3;               // groups of one lineage within this many cells form one area
 export const MEMORY_MS = 20000;            // a recent event rings on the globe this long
