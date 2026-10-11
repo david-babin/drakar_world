@@ -1,4 +1,4 @@
-# drakar.tech — production image (Coolify: "Dockerfile" build pack)
+# drakar world — production image (Coolify: "Dockerfile" build pack)
 
 # ---- build: bundles and minifies the site (public/) and the server (bin/backend.js) ----
 FROM node:22-slim AS build

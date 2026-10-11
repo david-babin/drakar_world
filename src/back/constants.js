@@ -20,7 +20,7 @@ export const RECENT_UNITS = 20;                // units listed by /api/stats
 
 // read API: pages allowed to call it from the browser (the home page's live figures, local previews)
 export const CORS_ORIGINS = new Set([
-  'https://drakar.tech', 'https://www.drakar.tech', 'https://home.drakar.tech',
+  'https://drakar.tech', 'https://www.drakar.tech',
   'http://localhost:8080', 'http://localhost:8081',
 ]);
 
@@ -43,4 +43,4 @@ export const MARKET_NOTIFY_MS = 1000;               // live trades: at most one 
 export const MARKET_FEED_SILENT_MS = 180_000;       // silent Finnhub socket: reconnect
 export const MARKET_LIVE_STALE_MS = 120_000;        // no trade for this long: no longer "live"
 export const MARKET_HISTORY = 30;                   // days returned by /api/market
-export const USER_AGENT = 'drakar.tech/0.4 (+https://drakar.tech)';
+export const USER_AGENT = 'drakar-world/0.4 (+https://world.drakar.tech)';

@@ -1,9 +1,9 @@
 {
-  "name": "drakar-tech",
+  "name": "drakar-world",
   "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "drakar.tech — one world, computed by those who watch it",
+  "description": "drakar world — one world, computed by those who watch it",
   "engines": {
     "node": ">=22"
   },

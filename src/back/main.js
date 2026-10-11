@@ -1,4 +1,4 @@
-// drakar.tech — one world, computed by its visitors. Entry point of the server (bundled into bin/backend.js).
+// drakar world — one world, computed by its visitors. Entry point of the server (bundled into bin/backend.js).
 // Node ≥ 22 (built-in node:sqlite and WebSocket client), no runtime dependencies.
 //   npm run build && npm start      → http://localhost:8787
 //   .env: FINNHUB_KEY=…  (optional; otherwise keyless sources, then a synthetic feed)
@@ -70,4 +70,4 @@ market.onChange(m => {
   visitors.broadcast({ t: 'market', market: m, climate: world.climate });
 });
 
-server.listen(config.port, () => console.log(`drakar.tech → http://localhost:${config.port}  (year ${world.year}, ${world.s.agents.length} groups, ${world.s.settlements.length} settlements, ${world.s.routes.length} routes)${market.hasKey ? ' · Finnhub ' + market.symbol : ' · no market key'}`));
+server.listen(config.port, () => console.log(`drakar world → http://localhost:${config.port}  (year ${world.year}, ${world.s.agents.length} groups, ${world.s.settlements.length} settlements, ${world.s.routes.length} routes)${market.hasKey ? ' · Finnhub ' + market.symbol : ' · no market key'}`));

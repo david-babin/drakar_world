@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "drakar.tech · server",
+      "name": "drakar world · server",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/bin/backend.js",
@@ -15,7 +15,7 @@
       "serverReadyAction": { "pattern": "http://localhost:([0-9]+)", "uriFormat": "http://localhost:%s", "action": "openExternally" }
     },
     {
-      "name": "drakar.tech · server (fresh world)",
+      "name": "drakar world · server (fresh world)",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/bin/backend.js",
@@ -27,7 +27,7 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "drakar.tech · simulation test",
+      "name": "drakar world · simulation test",
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/test/sim.test.mjs",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// build-earth.mjs — builds drakar.tech's Earth data, once, outside the runtime.
+// build-earth.mjs — builds drakar world's Earth data, once, outside the runtime.
 //
 // Inputs (not versioned; fetched into .cache/earth/ when not given):
 //   --etopo  etopo1.jpg      ETOPO1 (NOAA) tinted by elevation, 5400×2700   — PyPI package `basemap-data` (or any ETOPO image)

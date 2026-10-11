@@ -1,4 +1,4 @@
-# drakar.tech — witness protocol
+# drakar world — witness protocol
 
 How a witness (the web page, the Android app, any other client) talks to the server: what it downloads,
 which messages it exchanges, and how it computes. The web page is the reference implementation
@@ -29,7 +29,7 @@ Read API (JSON, no cache): `/api/world` (snapshot, as in `hello`), `/api/market`
 
 ## 2. Connection
 
-WebSocket at `wss://drakar.tech/ws`, JSON text messages, `permessage-deflate` if offered (no context
+WebSocket at `wss://world.drakar.tech/ws`, JSON text messages, `permessage-deflate` if offered (no context
 takeover). Every message is an object with a type `t`.
 
 - The server sends `tick` every **20 s**. No message for **45 s**: consider the link dead, drop it, reconnect

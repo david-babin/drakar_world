@@ -1,4 +1,4 @@
-// drakar.tech — the page. Bundled by tools/build.mjs into public/app.js.
+// drakar world — the page. Bundled by tools/build.mjs into public/app.js.
 import { app, DEMO, WALLPAPER, EMBED } from './state.js';
 import { cam } from './camera.js';
 import { IDLE_FRAMES } from './constants.js';

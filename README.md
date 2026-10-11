@@ -1,4 +1,4 @@
-# drakar.tech — one world, computed by those who watch it
+# drakar world — one world, computed by those who watch it
 
 The holding company's home page. It has no purpose. One persistent world, shared by every visitor: each
 browser that opens the page receives a region, simulates 240 seasons of it, and sends the result back. The
@@ -117,7 +117,7 @@ the new rules by itself. `npm test` checks that the bundle computes exactly what
 
 The full witness protocol (data files, messages, shapes, engine) is documented in
 [`docs/protocol.md`](docs/protocol.md).
-The Android live wallpaper ([drakar_tech_android](https://github.com/david-babin/drakar_tech_android)) is built on it;
+The Android live wallpaper ([drakar_world_android](https://github.com/david-babin/drakar_world_android)) is built on it;
 its tests use fixtures made from this repository (`src/lib`, `public/engine.js`) — regenerate them when the rules
 change.
 
