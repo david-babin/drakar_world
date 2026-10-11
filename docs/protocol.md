@@ -65,7 +65,7 @@ takeover). Every message is an object with a type `t`.
 | `progress` | `sigil`, `region`, `step`, `agents [[id, x, y, lin, pop]]`, `full?`, `gone? [id]` | its live groups: `full` replaces the set, otherwise update by id and remove `gone` |
 | `release` | `region`, `sigil` | it finished or left |
 | `unit` | `unit` (packed) | answer to `lease` |
-| `ack` | `verified`, `tick`, `serverMs` | result accepted |
+| `ack` | `tick`, `serverMs` | result accepted (whether it was audited is never told) |
 | `nack` | `reason`, `engine?` | refused (`no free region`, `already computing`, `lease invalid or expired`, `unreadable result`, `engine outdated` — then load `engine` and lease again; `result mismatch` or `invalid result: …` — cheating: the connection is closed, see section 4) |
 
 ### Witness → server

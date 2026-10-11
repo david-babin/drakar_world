@@ -98,7 +98,7 @@ export function createVisitors(server, world, { markDirty, logUnit, engineVersio
           if (r.cheat) return ban(ws, me, r.reason);
           if (!r.ok) return ws.send({ t: 'nack', reason: r.reason });
           markDirty();
-          ws.send({ t: 'ack', verified: r.verified, tick: world.tick, serverMs: Date.now() - t0 });
+          ws.send({ t: 'ack', tick: world.tick, serverMs: Date.now() - t0 });   // (whether it was audited stays server-side)
           hub.broadcast({ t: 'delta', ...r.delta });                       // only the delta, to everyone (sender included)
           for (const e of r.entries) hub.broadcast({ t: 'chronicle', entry: packEntry(e) });
         }
