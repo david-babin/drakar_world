@@ -23,6 +23,38 @@ for (let i = 0; i < N; i++) {
 console.log(`${((Date.now() - t0) / N).toFixed(1)} ms/unit · state ${(JSON.stringify(w.s).length / 1024) | 0} kB`);
 console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  ${c.kind} ${JSON.stringify(c.p)}`).join('\n'));
 
+// ---------- forged results: every one must be refused, unaudited, as cheating ----------
+{
+  const { packResult, unpackResult } = await import('../src/lib/index.js');
+  const wf = World.create(5, TERRAIN);
+  for (let i = 0; i < 40; i++) { const u = wf.lease('TEST-0005'); wf.integrate(simulateUnit(wf.T, u), 'TEST-0005'); }   // a world with settlements
+  const forgeries = {
+    'huge population': r => { r.agents[0].pop = 2_000_000_000; },
+    'group from another region': r => { r.agents.push({ ...r.agents[0], id: wf.s.agents.find(a => !r.agents.some(b => b.id === a.id)).id }); },
+    'duplicate group': r => { r.agents.push({ ...r.agents[0] }); },
+    'more groups than the land holds': r => { const a = r.agents[0]; for (let k = 0; k < 400; k++) r.agents.push({ ...a, id: r.agents.length > 0 ? 1e9 + k : k }); },
+    'group off the grid': r => { r.agents[0].y = 9999; },
+    'genome out of range': r => { r.agents[0].g = [999, 0, 0, 0, 0, 0, 0, 0]; },
+    'unknown lineage': r => { r.agents[0].lin = 99; },
+    'inflated decisions': r => { r.decisions = 1e12; },
+    'HTML settlement name': r => { const a = r.agents[0]; r.settlements.push({ id: 1e9, x: a.x, y: a.y, lin: a.lin, name: '<iframe src=//x.yz>', founded: r.tick }); },
+    'HTML event name': r => { r.events.push({ kind: 'found', tick: r.tick, lin: 0, x: 10, y: 10, name: '<img src=x onerror=1>' }); },
+    'huge event name': r => { r.events.push({ kind: 'found', tick: r.tick, lin: 0, x: 10, y: 10, name: 'x'.repeat(3_000_000) }); },
+    'unknown event kind': r => { r.events.push({ kind: 'genesis', tick: r.tick, lin: 0, x: 10, y: 10 }); },
+    'route from another region': r => { const far = wf.s.settlements.find(st => !r.settlements.some(s => s.id === st.id)); r.routes.push({ a: far.id, b: far.id + 1, lin: 0, tick: r.tick, sea: 0 }); },
+  };
+  let refused = 0;
+  for (const [label, forge] of Object.entries(forgeries)) {
+    const u = wf.lease('TEST-0005');
+    const r = unpackResult(JSON.parse(JSON.stringify(packResult(simulateUnit(wf.T, u)))));
+    forge(r);
+    const ok = wf.integrate(r, 'TEST-0005');                    // unaudited: only the invariants stand in the way
+    if (ok.ok || !ok.cheat) throw new Error(`forged result accepted: ${label}`);
+    refused++;
+  }
+  console.log(`forgeries OK · ${refused} forged results refused without an audit`);
+}
+
 {
   const { unpackSnapshot, applyDelta, packUnit, unpackUnit, packResult, unpackResult, packEntry, unpackEntry } = await import('../src/lib/index.js');
   const wireRun = (w2, units, label) => {

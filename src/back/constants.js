@@ -18,6 +18,14 @@ export const PROGRESS_MAX = 512;               // groups relayed per progress me
 export const SIGIL_RE = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const RECENT_UNITS = 20;                // units listed by /api/stats
 
+// abuse limits (per visitor address, per connection) and cheating
+export const WS_PER_IP = 8;                    // connections from one address (a household, an office)
+export const LEASES_PER_IP = 4;                // regions computed at once from one address
+export const MSG_RATE = 10, MSG_BURST = 40;    // messages a second per connection, and the burst allowed (progress: 2 a second)
+export const RESYNC_MS = 5000;                 // at most one full world resent per connection in this time
+export const PROBATION = 2;                    // the first results of each connection are always audited
+export const BAN_MS = 24 * 3600_000;           // a cheater's address and sigil are refused this long
+
 // read API: pages allowed to call it from the browser (the home page's live figures, local previews)
 export const CORS_ORIGINS = new Set([
   'https://drakar.tech', 'https://www.drakar.tech',

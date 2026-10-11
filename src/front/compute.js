@@ -10,9 +10,9 @@ export const budgetMs = () => Math.max(3, Math.min(14, 2 + (tele.cores || 2) * 1
 let run = null;
 export const currentRun = () => run;
 export function abortUnit() { if (run) { const r = run; run = null; r.aborted = true; r.resolve(); } app.lease = null; app.version++; }
-export async function runUnit(unit, verify, onDone, onProgress) {
+export async function runUnit(unit, onDone, onProgress) {
   const gen = engine().simulateUnitGen(app.T, unit);
-  const L = { unit, agents: unit.agents, step: 0, t0: performance.now(), verify };
+  const L = { unit, agents: unit.agents, step: 0, t0: performance.now() };
   app.lease = L;
   let lastDec = 0, lastT = performance.now(), lastProg = 0;
   await new Promise(resolve => {

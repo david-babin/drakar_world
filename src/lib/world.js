@@ -9,6 +9,7 @@ import { mulberry32, hashMix } from './random.js';
 import { walkable, landfallCells } from './terrain.js';
 import { genome } from './genome.js';
 import { simulateUnit, hashResult } from './simulate.js';
+import { checkResult } from './check.js';
 import { packAgent, packSettlement, packRoute, packEntry } from './wire.js';
 
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -110,9 +111,12 @@ export class World {
   integrate(result, sigil, { now = Date.now(), verify = false } = {}) {
     const l = this.leases.get(result.region);
     if (!l || l.sigil !== sigil || l.tick !== result.tick) return { ok: false, reason: 'lease invalid or expired' };
+    // every result, audited or not, must hold the unit's invariants (check.js); a refusal or a mismatch is cheating
+    const bad = checkResult(result, l.unit, this.s.lineages.length);
+    if (bad) { this.leases.delete(result.region); return { ok: false, reason: 'invalid result: ' + bad, cheat: true }; }
     if (verify) {
       const ref = simulateUnit(this.T, l.unit);
-      if (hashResult(ref) !== hashResult(result)) { this.leases.delete(result.region); return { ok: false, reason: 'result mismatch' }; }
+      if (hashResult(ref) !== hashResult(result)) { this.leases.delete(result.region); return { ok: false, reason: 'result mismatch', cheat: true }; }
     }
     this.leases.delete(result.region);
     const ids = new Set(l.ids);

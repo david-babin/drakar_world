@@ -3,7 +3,7 @@ export const app = {
   world: null,       // unpacked world (snapshot + deltas)
   T: null,           // terrain
   online: 1,
-  lease: null,       // the unit being computed here: { unit, agents, step, t0, verify }
+  lease: null,       // the unit being computed here: { unit, agents, step, t0 }
   link: 'ok',        // ok · connecting · reconnecting
   worldAt: Infinity, // when the first world arrived (performance.now)
   version: 0,        // bumped whenever something drawn changes (wallpaper mode redraws only then)

@@ -9,6 +9,7 @@ export * from './random.js';
 export * from './terrain.js';
 export * from './genome.js';
 export * from './simulate.js';
+export * from './check.js';
 export * from './wire.js';
 export * from './world.js';
 export * from './market.js';

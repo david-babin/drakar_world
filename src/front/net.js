@@ -96,12 +96,12 @@ export async function loopServer() {
       await engineReady;
       const m = await ask({ t: 'lease' });
       if (m.t !== 'unit') { app.lease = null; await sleep(NET.noUnitRetryMs); continue; }
-      const unit = engine().unpackUnit(m.unit), verify = m.verify;
+      const unit = engine().unpackUnit(m.unit);
       const started = Date.now();
       const prog = progressSender(unit.region);
-      await runUnit(unit, verify, async (result, ms) => {
+      await runUnit(unit, async (result, ms) => {
         if (Date.now() - started > NET.leaseStaleMs || sock?.readyState !== 1) return;   // computation interrupted too long (hidden tab, sleep): the lease expired, send nothing
-        const r = await ask({ t: 'result', result: engine().packResult(result), verify, hash: engine().hashResult(result), ms: Math.round(ms), engine: engineVersion() });
+        const r = await ask({ t: 'result', result: engine().packResult(result), hash: engine().hashResult(result), ms: Math.round(ms), engine: engineVersion() });
         if (r.t === 'nack' && r.engine) engineReady = ensureEngine(r.engine).catch(() => {});   // the server moved on: next unit with its engine
         if (r.t === 'ack') { tele.units++; tele.ticks += STEPS; tele.decisions += result.decisions; }
       }, (step, agents) => send(prog(step, agents)));

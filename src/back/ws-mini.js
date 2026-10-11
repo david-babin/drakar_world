@@ -8,13 +8,14 @@ import { WS_MAX_MESSAGE as MAX_MESSAGE, WS_DEFLATE_MIN as DEFLATE_MIN, WS_PING_M
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';   // RFC 6455 §1.3
 const TAIL = Buffer.from([0, 0, 0xff, 0xff]);
 
-export function attachWebSocket(server, path, onConnection, { pingMs = WS_PING_MS } = {}) {
+export function attachWebSocket(server, path, onConnection, { pingMs = WS_PING_MS, admit = () => true } = {}) {
   const clients = new Set();
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     const key = req.headers['sec-websocket-key'];
     if (url.pathname !== path || !key || !/websocket/i.test(req.headers.upgrade || '')) { socket.destroy(); return; }
+    if (!admit(req)) { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n'); return; }   // refused by the caller (limits, bans)
     const accept = createHash('sha1').update(key + GUID).digest('base64');
     // per-message compression without context takeover: each message is independent (simple, safe, no per-client memory)
     const deflate = /permessage-deflate/.test(req.headers['sec-websocket-extensions'] || '');

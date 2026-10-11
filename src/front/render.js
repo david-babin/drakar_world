@@ -170,7 +170,9 @@ export function hoverAt(mx, my) {
   for (const h of hits) { const d = (h.x - mx) ** 2 + (h.y - my) ** 2; if (d < bd) { bd = d; best = h; } }
   if (!best || !best.st) { tip.style.display = 'none'; return; }           // groups stay nameless
   tip.style.display = 'block'; tip.style.left = mx + 14 + 'px'; tip.style.top = my + 14 + 'px';
-  tip.innerHTML = `${best.st.name}<small>${t('yearLower', { n: fmt(Math.floor(best.st.founded / 4)) })}</small>`;
+  // as text, never as HTML: a settlement's name comes from a visitor's result
+  const year = document.createElement('small'); year.textContent = t('yearLower', { n: fmt(Math.floor(best.st.founded / 4)) });
+  tip.replaceChildren(String(best.st.name), year);
 }
 
 function strokePath(pts) {

@@ -64,9 +64,9 @@ takeover). Every message is an object with a type `t`.
 | `lease` | `region`, `sigil` | another witness started a region |
 | `progress` | `sigil`, `region`, `step`, `agents [[id, x, y, lin, pop]]`, `full?`, `gone? [id]` | its live groups: `full` replaces the set, otherwise update by id and remove `gone` |
 | `release` | `region`, `sigil` | it finished or left |
-| `unit` | `unit` (packed), `verify` | answer to `lease` |
+| `unit` | `unit` (packed) | answer to `lease` |
 | `ack` | `verified`, `tick`, `serverMs` | result accepted |
-| `nack` | `reason`, `engine?` | refused (`no free region`, `lease invalid or expired`, `result mismatch`, `unreadable result`, `engine outdated` — then load `engine` and lease again) |
+| `nack` | `reason`, `engine?` | refused (`no free region`, `already computing`, `lease invalid or expired`, `unreadable result`, `engine outdated` — then load `engine` and lease again; `result mismatch` or `invalid result: …` — cheating: the connection is closed, see section 4) |
 
 ### Witness → server
 
@@ -75,7 +75,7 @@ takeover). Every message is an object with a type `t`.
 | `hello` | `sigil` |
 | `lease` | — (one at a time; the answer is `unit` or `nack`) |
 | `progress` | `region`, `step`, `agents [[id, x, y, lin, pop]]`, `full?`, `gone?` — optional, at most every 500 ms; up to 512 groups; send `full: 1` first, then only what changed |
-| `result` | `result` (packed), `hash`, `ms`, `verify` (as received), `engine` (the fingerprint the unit was computed with) |
+| `result` | `result` (packed), `hash`, `ms`, `engine` (the fingerprint the unit was computed with) |
 | `resync` | — |
 
 ## 3. Shapes (positional arrays)
@@ -106,9 +106,21 @@ routes; apply `changed`; add `settlements` and `routes`; set lineages' `dead`; s
 
 ## 4. Computing a unit
 
-A unit is 240 seasons of one region, leased for **90 s**. The simulation is deterministic: the server re-runs one
-unit in seven and refuses a result whose hash differs. To compute exactly what the server computes, a witness
-**must** run the server's `engine.js` (never a reimplementation), at the version announced in `hello`.
+A unit is 240 seasons of one region, leased for **90 s**. The simulation is deterministic, so results are
+checked, not trusted:
+
+- **every** result must hold the unit's invariants (`src/lib/check.js`): ids from the unit or its reserved block,
+  at most as many groups as the region holds, populations the land can carry, generated names, known event kinds;
+- the server **audits** some results by re-running the unit and comparing hashes: the first two of each
+  connection, then one in seven, drawn when the result arrives and never announced;
+- a result that breaks an invariant or fails its audit is cheating: the connection is closed and its address and
+  sigil are refused for 24 hours.
+
+Limits: 8 connections per address, one region at a time per connection and 4 per address, 10 messages a second
+per connection (bursts of 40), one `resync` answered every 5 s.
+
+To compute exactly what the server computes, a witness **must** run the server's `engine.js` (never a
+reimplementation), at the version announced in `hello`.
 
 `engine.js` is a plain script defining the global `DrakarEngine` (no DOM, no network, no timers; needs only a
 standard ECMAScript 2020 engine — V8 recommended: Chrome, Node, Android's `androidx.javascriptengine`).
@@ -123,7 +135,7 @@ DrakarEngine.finish()                → resultJson          {"result", "hash", 
 DrakarEngine.compute(unitJson)       → resultJson          begin + step to the end + finish
 ```
 
-Send `{ t: "result", result, hash, ms, verify, engine }` with `result` and `hash` from `finish()`. Slice the
+Send `{ t: "result", result, hash, ms, engine }` with `result` and `hash` from `finish()`. Slice the
 work with `step(n)` to stay responsive and to send `progress`; finish within the 90 s lease (a unit takes
 30–60 ms of CPU on a recent core). A result sent after its lease expired is refused.
 

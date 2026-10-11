@@ -129,9 +129,9 @@ takeover, built-in zlib; `ws-mini.js`). Objects travel as **positional arrays** 
 **deltas**.
 
 Client → server: `hello {sigil}` · `lease` · `progress {region, step, agents, gone, full?}` (every 500 ms during
-computation, **differential**: only the groups that moved) · `result {result, hash, ms, verify, engine}` (final groups,
+computation, **differential**: only the groups that moved) · `result {result, hash, ms, engine}` (final groups,
 new items, and only the events the server keeps) · `resync` (sequence gap).
-Server → client: `hello {engine, world, peers}` · `unit {unit, verify}` (the region's groups + settlements and routes
+Server → client: `hello {engine, world, peers}` · `unit {unit}` (the region's groups + settlements and routes
 within ±80 cells) · `ack` / `nack` · `delta {seq, region, removed, agents, settlements, routes, dead, changed,
 removedSettlements, regions, totals}` · `chronicle` · `market` · `online` / `tick` · `lease` / `progress` / `release` (the others).
 
