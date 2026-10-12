@@ -57,7 +57,8 @@ export class World {
   setMarket(m) { this.market = m; this.climate = m ? climateOf(m.change) : 0; }
   agentsIn(region) { return this.s.agents.filter(a => regionOf(a.x, a.y) === region); }
   get tick() { return Math.min(...this.s.regions.map(r => r.tick)); }
-  get year() { const r = this.s.regions; return Math.floor(r.reduce((n, x) => n + x.tick, 0) / r.length / 4); }
+  // the most advanced region: no chronicle entry can be dated after it
+  get year() { return Math.floor(Math.max(...this.s.regions.map(r => r.tick)) / 4); }
 
   lease(sigil, now = Date.now()) {
     for (const [r, l] of this.leases) if (now - l.at > LEASE_MS) this.leases.delete(r);

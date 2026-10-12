@@ -32,7 +32,7 @@ export function unpackSnapshot(w) {
     agents: w.agents.map(unpackAgent), settlements: w.settlements.map(unpackSettlement), routes: w.routes.map(unpackRoute),
     lineages: w.lineages.map(([id, name, hue, dead]) => ({ id, name, hue, dead })), chronicle: w.chronicle.map(unpackEntry),
     totals: { units: w.totals[0], ticks: w.totals[1], decisions: w.totals[2] }, contributors: w.contributors, online: w.online,
-    climate: w.climate, market: w.market, get tick() { return Math.min(...this.regions.map(r => r.tick)); }, get year() { return Math.floor(this.regions.reduce((n, r) => n + r.tick, 0) / this.regions.length / 4); },
+    climate: w.climate, market: w.market, get tick() { return Math.min(...this.regions.map(r => r.tick)); }, get year() { return Math.floor(Math.max(...this.regions.map(r => r.tick)) / 4); },
   };
 }
 // applies a delta (output of integrate) to an unpacked client world
