@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// build-icons.mjs — renders the favicon and app icons from src/front/static/icons/icon.svg (Playwright, dev only).
+// build-icons.mjs — takes the world's icon from the brand (brand/logos/svg/drakar-icon-world.svg: the Lucide globe
+// and the brass dot) as icon.svg and favicon.svg, and renders it to PNG (Playwright, dev only).
 //   node tools/build-icons.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 const dir = path.resolve('src/front/static/icons');
-const svg = fs.readFileSync(path.join(dir, 'icon.svg'), 'utf8');
+const svg = fs.readFileSync(path.resolve('brand/logos/svg/drakar-icon-world.svg'), 'utf8');
+for (const f of ['icon.svg', 'favicon.svg']) fs.writeFileSync(path.join(dir, f), svg);
 const sizes = [32, 180, 192, 512];
 const b = await chromium.launch();
 for (const s of sizes) {

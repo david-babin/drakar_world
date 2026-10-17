@@ -26,7 +26,7 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 | `node tools/long-run.mjs 95000 5000 --resume aged.db` | continues that world in place (stop the server using it first) |
 | `node tools/long-run.mjs 20000 1000 --from world.db --db branch.db` | starts from an existing world, writes a new database, leaves the source untouched |
 | `npm run build:earth` | rebuilds the Earth data into `assets/earth/` |
-| `npm run build:icons` | renders the icons from `icon.svg` (requires playwright) |
+| `npm run build:icons` | takes the world's icon from the brand and renders it to PNG (requires playwright) |
 
 ### Production (Coolify)
 
@@ -120,8 +120,8 @@ wallpaper mode); the Android app links to them from its settings screen. The lab
   WebSocket** (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per
   second. Without a key: Stooq → Yahoo → FRED, then a dated random walk (`src/lib/market.js`). SQLite cache.
 - **WebSocket** (`src/back/ws-mini.js`): minimal RFC 6455 server with permessage-deflate, no dependencies.
-- **Icons** (`tools/build-icons.mjs`): renders `src/front/static/icons/icon.svg` to PNG 32 / 180 / 192 / 512.
-  `favicon.svg` is the background-less variant for the tab; `manifest.webmanifest` allows adding the page to a
+- **Icons** (`tools/build-icons.mjs`): the world's icon comes from the brand (`brand/logos/svg/drakar-icon-world.svg`,
+  the Lucide globe and the brass dot), copied as `icon.svg` and `favicon.svg` and rendered to PNG 32 / 180 / 192 / 512; `manifest.webmanifest` allows adding the page to a
   home screen, full screen.
 - **Page** (`src/front/`): everything geographic is drawn by the GPU in one WebGL pass (`gl/`): the disc and
   terrain classes (`base.png`), the **land** (Natural Earth rings filled by stencil parity into a 4096 × 2048
