@@ -63,6 +63,9 @@ public/, bin/  build output (not versioned)
    once into `.cache/earth/` (the PyPI package `basemap-data`, the npm package `world-atlas`).
 2. **`public/`.** Earth data and `src/front/static/` copied; `src/front/main.js` bundled and minified into
    `app.js` (one IIFE, ES2020) with the locales embedded; `styles.css` minified and inlined into `index.html`.
+   Fonts (Inter Tight 800, Manrope 400–800, JetBrains Mono 400/500) come from the `@fontsource` dev dependencies:
+   only the latin and latin-ext subsets, copied into `public/fonts/` and declared by `@font-face` rules inlined
+   in the page (as data URIs in `demo.html`). The page loads nothing from a third party.
    Every versioned URL (`?v=`) carries the file's fingerprint — the same one the server uses as ETag — so it
    is cached for a year, immutable.
 3. **`bin/backend.js`.** `src/back/main.js` bundled and minified for Node 22, with a source map.

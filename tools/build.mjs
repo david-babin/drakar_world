@@ -10,7 +10,8 @@
 //      it is built now (its inputs are fetched into .cache/earth/ on first use).
 //   2. public/: Earth data + src/front/static/ copied as is; src/front/main.js bundled and minified into
 //      app.js; styles.css minified and inlined into index.html; locales embedded in the bundle; every
-//      versioned URL (?v=) carries the file's fingerprint, the same one the server uses as ETag.
+//      versioned URL (?v=) carries the file's fingerprint, the same one the server uses as ETag. The fonts come
+//      from the @fontsource packages (latin + latin-ext only) and are served by the app itself: public/fonts/.
 //   3. bin/backend.js: src/back/main.js bundled and minified for Node 22 (no runtime dependencies).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +24,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const at = (...p) => path.join(ROOT, ...p);
 const EARTH = ['terrain.bin', 'base.png', 'land.bin', 'coasts.bin', 'contours.bin'];
 const PUBLIC = at('public'), BIN = at('bin');
+// self-hosted fonts (@fontsource, dev dependencies): package → weights; only these subsets are shipped
+const FONTS = { 'inter-tight': [800], 'manrope': [400, 600, 700, 800], 'jetbrains-mono': [400, 500] };
+const FONT_SUBSETS = ['latin-ext', 'latin'];
 const args = new Set(process.argv.slice(2));
 // the commit being built, shown at the bottom left of the page: from the CI (Coolify passes SOURCE_COMMIT),
 // otherwise read from .git without needing git itself (the Docker build stage has no git binary)
@@ -72,14 +76,28 @@ async function bundleFront(assets, engineVersion) {
   });
   return r.outputFiles[0].contents;
 }
-async function styles() {
-  const r = await esbuild.transform(fs.readFileSync(at('src/front/styles.css'), 'utf8'), { loader: 'css', minify: true });
-  return r.code.trim();
+const minCss = async css => (await esbuild.transform(css, { loader: 'css', minify: true })).code.trim();
+const styles = () => minCss(fs.readFileSync(at('src/front/styles.css'), 'utf8'));
+// @font-face rules of FONTS, taken from the packages' CSS (which carries the unicode-range of each subset);
+// each woff2 is handed to `url(file name, bytes)`, which returns the URL to write in the rule
+function fontFaces(url) {
+  const out = [];
+  for (const [pkg, weights] of Object.entries(FONTS)) for (const w of weights) {
+    const css = fs.readFileSync(at('node_modules/@fontsource', pkg, `${w}.css`), 'utf8');
+    for (const sub of FONT_SUBSETS) {
+      const block = css.split('/* ').find(b => b.startsWith(`${pkg}-${sub}-${w}-normal */`));
+      if (!block) throw new Error(`font ${pkg} ${sub} ${w} not found`);
+      const file = `${pkg}-${sub}-${w}-normal.woff2`;
+      out.push(block.slice(block.indexOf('@font-face'))
+        .replace(/src:[^;]*;/, () => `src: url(${url(file, fs.readFileSync(at('node_modules/@fontsource', pkg, 'files', file)))}) format('woff2');`));
+    }
+  }
+  return out.join('\n');
 }
 // light HTML minification: comments and whitespace between tags
 const squeezeHtml = h => h.replace(/<!--[\s\S]*?-->/g, '').replace(/>\s+</g, '><').trim() + '\n';
 // (function replacers: minified code is full of `$&`-like sequences that a replacement string would expand)
-const page = async (script) => { const css = await styles(); return squeezeHtml(fs.readFileSync(at('src/front/index.html'), 'utf8'))
+const page = async (script, fonts) => { const css = fonts + (await styles()); return squeezeHtml(fs.readFileSync(at('src/front/index.html'), 'utf8'))
   .replace('/*__CSS__*/', () => css)
   .replace('/*__VERSION__*/', () => VERSION)
   .replace('<script src="/*__APP__*/" defer></script>', () => script); };
@@ -107,7 +125,8 @@ async function buildSite() {
   put(path.join(PUBLIC, 'engine.js'), engine);
   const app = await bundleFront(assets, engineVersion);
   put(path.join(PUBLIC, 'app.js'), app);
-  const html = await page(`<script src="/engine.js?v=${engineVersion}" defer></script><script src="/app.js?v=${fingerprint(Buffer.from(app))}" defer></script>`);
+  const fonts = fontFaces((file, data) => { put(path.join(PUBLIC, 'fonts', file), data); return `/fonts/${file}?v=${fingerprint(data)}`; });
+  const html = await page(`<script src="/engine.js?v=${engineVersion}" defer></script><script src="/app.js?v=${fingerprint(Buffer.from(app))}" defer></script>`, await minCss(fonts));
   put(path.join(PUBLIC, 'index.html'), html);
   return { app, engine, html };
 }
@@ -115,7 +134,8 @@ async function buildSite() {
 async function buildDemo(app, engine) {
   const data = Object.fromEntries(EARTH.map(f => [f, fs.readFileSync(at('assets/earth', f)).toString('base64')]));
   const safe = s => s.replace(/<\/script/gi, '<\\/script');
-  const html = (await page(`<script>window.DRAKAR_DATA=${JSON.stringify(data)}</script><script>${safe(Buffer.from(engine).toString('utf8'))}</script><script>${safe(Buffer.from(app).toString('utf8'))}</script>`))
+  const html = (await page(`<script>window.DRAKAR_DATA=${JSON.stringify(data)}</script><script>${safe(Buffer.from(engine).toString('utf8'))}</script><script>${safe(Buffer.from(app).toString('utf8'))}</script>`,
+    await minCss(fontFaces((file, bytes) => `data:font/woff2;base64,${bytes.toString('base64')}`))))
     .replace('<title>drakar</title>', '<title>drakar · demo</title>');
   fs.writeFileSync(at('demo.html'), html);
   return html;
