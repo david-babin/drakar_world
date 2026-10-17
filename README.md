@@ -120,9 +120,9 @@ wallpaper mode); the Android app links to them from its settings screen. The lab
   WebSocket** (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per
   second. Without a key: Stooq → Yahoo → FRED, then a dated random walk (`src/lib/market.js`). SQLite cache.
 - **WebSocket** (`src/back/ws-mini.js`): minimal RFC 6455 server with permessage-deflate, no dependencies.
-- **Icons** (`tools/build-icons.mjs`): the world's icon comes from the brand (`brand/logos/svg/drakar-icon-world.svg`,
-  the Lucide globe and the brass dot), copied as `icon.svg` and `favicon.svg` and rendered to PNG 32 / 180 / 192 / 512; `manifest.webmanifest` allows adding the page to a
-  home screen, full screen.
+- **Icons** (`tools/build-icons.mjs`): the world's icon comes from the brand (`brand/logos/svg/drakar-icon-worldw.svg`,
+  the Lucide earth and the brass dot), copied as `icon.svg` and `favicon.svg` and rendered to PNG 32 / 180 / 192 / 512; `manifest.webmanifest` allows adding the page to a
+  home screen, full screen, under the name `worldw` (the Android app is `worlda`). The page title is `drakar world`.
 - **Page** (`src/front/`): everything geographic is drawn by the GPU in one WebGL pass (`gl/`): the disc and
   terrain classes (`base.png`), the **land** (Natural Earth rings filled by stencil parity into a 4096 × 2048
   texture, once at load), the **coasts and contour lines** (quads extruded in the vertex shader, 16-bit indices

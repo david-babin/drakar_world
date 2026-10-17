@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="drakar world">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="drakar worldw">
 <rect width="64" height="64" rx="12" fill="#141a22"/>
-<g transform="translate(6.5 14) scale(1.5)" fill="none" stroke="#f6f3ee" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></g>
+<g transform="translate(6.5 14) scale(1.5)" fill="none" stroke="#f6f3ee" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><path d="M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z"/></g>
 <circle cx="52.5" cy="43.73" r="5" fill="#b8862b"/>
 </svg>

@@ -168,7 +168,7 @@ async function buildDemo(app, engine) {
   const safe = s => s.replace(/<\/script/gi, '<\\/script');
   const html = (await page(`<script>window.DRAKAR_DATA=${JSON.stringify(data)}</script><script>${safe(Buffer.from(engine).toString('utf8'))}</script><script>${safe(Buffer.from(app).toString('utf8'))}</script>`,
     await minCss(fontFaces((file, bytes) => `data:font/woff2;base64,${bytes.toString('base64')}`))))
-    .replace('<title>drakar</title>', '<title>drakar · demo</title>');
+    .replace('<title>drakar world</title>', '<title>drakar world · demo</title>');
   fs.writeFileSync(at('demo.html'), html);
   return html;
 }
