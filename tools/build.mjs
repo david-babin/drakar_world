@@ -82,7 +82,8 @@ async function bundleFront(assets, engineVersion) {
 }
 const minCss = async css => (await esbuild.transform(css, { loader: 'css', minify: true })).code.trim();
 const cssOf = (...files) => minCss(files.map(f => fs.readFileSync(at('src/front', f), 'utf8')).join('\n'));
-const styles = () => cssOf('tokens.css', 'styles.css');
+// the language picker's style comes from the brand (submodule brand/), like its script
+const styles = () => cssOf('tokens.css', '../../brand/css/lang.css', 'styles.css');
 // @font-face rules of FONTS, taken from the packages' CSS (which carries the unicode-range of each subset);
 // each woff2 is handed to `url(file name, bytes)`, which returns the URL to write in the rule
 function fontFaces(url) {
@@ -145,7 +146,7 @@ async function buildLegal(fonts) {
     entryPoints: [at('src/front/legal.js')], bundle: true, minify: true, format: 'iife', target: ['es2020'],
     define: { __LANGS__: JSON.stringify(langs) }, legalComments: 'none', write: false, logLevel: 'silent',
   })).outputFiles[0].text.trim();
-  const style = fonts + await cssOf('tokens.css', 'legal.css'), template = squeezeHtml(fs.readFileSync(at('src/front/legal.html'), 'utf8'));
+  const style = fonts + await cssOf('tokens.css', '../../brand/css/lang.css', 'legal.css'), template = squeezeHtml(fs.readFileSync(at('src/front/legal.html'), 'utf8'));
   const first = langs.includes('en') ? 'en' : langs[0];
   for (const [page, name] of Object.entries(LEGAL)) {
     const text = Object.fromEntries(langs.map(l => [l, fs.readFileSync(at('src/front/legal', `${name}.${l}.md`), 'utf8')]));
@@ -154,7 +155,6 @@ async function buildLegal(fonts) {
     const html = template
       .replace('/*__TITLE__*/', () => text[first].match(/^# (.*)$/m)[1].replace(/&/g, '&amp;').replace(/</g, '&lt;'))
       .replace('/*__CSS__*/', () => style)
-      .replace('/*__LANGS__*/', () => langs.length > 1 ? langs.map(l => `<a data-l="${l}" href="?lang=${l}"${l === first ? ' class="on"' : ''}>${l}</a>`).join(' ') : '')
       .replace('/*__ARTICLES__*/', () => langs.map(l => `<article data-lang="${l}" lang="${l}"${hide(l)}>${markdown(text[l])}</article>`).join(''))
       .replace('/*__NAV__*/', () => langs.map(l => `<nav data-lang="${l}"${hide(l)}>${
         Object.entries(LEGAL).map(([p, n]) => link(l, '/' + p, L[l].legal[n])).join(' · ')} · ${link(l, '/', L[l].legal.globe)}</nav>`).join(''))

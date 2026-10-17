@@ -1,6 +1,6 @@
 // Page settings: rendering, interaction, recovery, timings.
 export const DEG = Math.PI / 180;
-export const STORAGE = { lang: 'drakar.lang', sigil: 'drakar.sigil' };   // localStorage keys
+export const STORAGE = { sigil: 'drakar.sigil' };   // localStorage keys (the language is the cookie of brand/js/lang.js)
 
 // rendering
 export const MAX_DPR = 3;                  // native density up to 3× (phones are often 2.6–3×)

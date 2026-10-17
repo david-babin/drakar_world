@@ -23,7 +23,7 @@ Les cours de bourse affichés viennent de services financiers interrogés par no
 | Nom | Rôle | Durée |
 | --- | --- | --- |
 | `drakar.sigil` | Reconnaître vos contributions | Jusqu'à effacement |
-| `drakar.lang` | Mémoriser la langue choisie | Jusqu'à effacement |
+| `drakar_lang` (cookie) | Mémoriser la langue choisie, commune à tous les sites drakar.tech | Un an |
 
 Dans l'application Android, le sigil et vos réglages restent dans le stockage de l'application et disparaissent à sa désinstallation.
 

@@ -23,7 +23,7 @@ The stock market prices shown come from financial services queried by our server
 | Name | Purpose | Duration |
 | --- | --- | --- |
 | `drakar.sigil` | Recognise your contributions | Until deleted |
-| `drakar.lang` | Remember the chosen language | Until deleted |
+| `drakar_lang` (cookie) | Remember the chosen language, shared by every drakar.tech site | One year |
 
 In the Android app, the sigil and your settings stay in the app's storage and disappear when it is uninstalled.
 

@@ -1,19 +1,13 @@
 // Language: UI strings from src/front/locales/<lang>.json, embedded by the build (no extra request).
-// Choice: ?lang= → saved choice → first supported language in the browser preferences → English.
+// Choice: the one shared by every drakar app (brand/js/lang.js: ?lang= → drakar_lang cookie on drakar.tech →
+// browser preferences → English), its picker with small flags at the bottom, beside the legal links.
+import '../../brand/js/lang.js';
 import { app } from './state.js';
 import { $ } from './dom.js';
-import { STORAGE } from './constants.js';
 
 export const LOCALES = __LOCALES__;
 export const SUPPORTED = Object.keys(LOCALES).length ? Object.keys(LOCALES) : ['en'];
-function pickLang() {
-  const q = new URLSearchParams(location.search).get('lang');
-  if (q && LOCALES[q]) return q;
-  try { const s = localStorage.getItem(STORAGE.lang); if (s && LOCALES[s]) return s; } catch {}
-  for (const l of navigator.languages || [navigator.language || 'en']) { const base = String(l).slice(0, 2).toLowerCase(); if (LOCALES[base]) return base; }
-  return LOCALES.en ? 'en' : SUPPORTED[0];
-}
-let lang = pickLang();
+let lang = LOCALES[DrakarLang.get()] ? DrakarLang.get() : (LOCALES.en ? 'en' : SUPPORTED[0]);
 let onChange = () => {};
 export const onLangChange = f => { onChange = f; };
 export const L = () => LOCALES[lang] || LOCALES.en || {};
@@ -24,14 +18,10 @@ export const lineageName = id => L().lineages?.[id] ?? app.world?.lineages[id]?.
 export function applyLang() {
   document.documentElement.lang = lang;
   document.querySelector('meta[name="description"]').content = t('meta.description');
-  $('lang').innerHTML = SUPPORTED.length > 1 ? SUPPORTED.map(l => `<a data-l="${l}" class="${l === lang ? 'on' : ''}">${l}</a>`).join(' ') : '';
   // the legal pages, in the same language (from the standalone demo, the site's)
   const site = location.protocol.startsWith('http') ? '' : 'https://world.drakar.tech';
   $('legal').innerHTML = `<a href="${site}/confidentialite?lang=${lang}">${t('legal.privacy')}</a> · <a href="${site}/conditions?lang=${lang}">${t('legal.terms')}</a>`;
   onChange();
 }
-$('lang').addEventListener('click', e => {
-  const l = e.target.dataset?.l; if (!l || l === lang) return;
-  lang = l; try { localStorage.setItem(STORAGE.lang, l); } catch {}
-  applyLang();
-});
+DrakarLang.onChange(l => { if (LOCALES[l]) { lang = l; applyLang(); } });
+if (SUPPORTED.length > 1) DrakarLang.picker($('lang'));

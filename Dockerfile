@@ -8,6 +8,8 @@ RUN npm ci --no-audit --no-fund
 # sources, Earth data and .git when the context has it (the commit shown on the page is read from it;
 # SOURCE_COMMIT, passed by Coolify, takes precedence) — see .dockerignore
 COPY . .
+RUN test -f brand/js/lang.js \
+      || { echo "brand/ is empty: the drakar_brand submodule was not fetched" >&2; exit 1; }
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 RUN npm run build

@@ -6,6 +6,7 @@ world only moves forward while someone is watching.
 
 ## Running
 
+    git submodule update --init   # brand/: drakar_brand, the shared language and its picker
     npm install               # dev dependencies only: esbuild, and the Earth data builders
     cp .env.example .env      # then FINNHUB_KEY=… (optional)
     npm start                 # build, then serve → http://localhost:8787
@@ -30,7 +31,8 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 ### Production (Coolify)
 
 "Dockerfile" build pack, two stages: the first installs the dev dependencies and runs the build, the
-second only receives `bin/` and `public/` (Node 22, no dependencies). Exposed port: `8787`.
+second only receives `bin/` and `public/` (Node 22, no dependencies). Exposed port: `8787`. Coolify must fetch the
+`brand` submodule (drakar_brand): its GitHub app needs access to that repository, as for drakar_share; the build stops otherwise.
 Variables: `FINNHUB_KEY` (secret), optionally `MARKET_SYMBOL`. `DB` is `/app/data/world.db` in the image:
 mount a **persistent volume on `/app/data`**, otherwise the world starts over on every deployment. A legacy
 `monde.db` found next to it is adopted on startup. Single instance (shared in-memory state + SQLite).
@@ -78,8 +80,10 @@ reloads the page's files on its own otherwise.
 
 ## Languages
 
-The page is available in English and French. The language is picked from `?lang=`, then the visitor's saved
-choice, then the browser preferences, defaulting to English; a discreet `en fr` switch sits next to `.tech`.
+The page is available in English and French. The language is the one shared by every drakar app, from
+`brand/js/lang.js` (submodule drakar_brand): `?lang=`, then the `drakar_lang` cookie set on `drakar.tech`, then the
+browser preferences, defaulting to English. Its picker, each language with a small flag, sits at the bottom, after
+the legal links (style: `brand/css/lang.css`, inlined by the build).
 UI strings live in `src/front/locales/<lang>.json` and are embedded in the bundle by the build (no extra request).
 Adding a language means adding a file. The chronicle is stored as structured entries (kind + parameters) and
 rendered client-side in the visitor's language; lineage names are translated by id.
@@ -93,7 +97,7 @@ rendered client-side in the visitor's language; lineage names are translated by 
 
 Static pages built from Markdown by `tools/build.mjs` (`tools/markdown.mjs`: headings, paragraphs, lists, tables,
 bold, code, links): every language is in the page and a 1 kB inline script shows the visitor's, picked as on the
-globe (`?lang=`, saved choice, browser) with the same `en fr` switch and the same saved key. They load neither the
+globe, with the same picker at the end of the footer. They load neither the
 globe nor the engine, nothing from a third party, only the self-hosted fonts. The server serves a path without
 extension from its `.html` file. The globe links to them, discreetly, after the version at the bottom left (not in
 wallpaper mode); the Android app links to them from its settings screen. The labels are in the locales (`legal`).
