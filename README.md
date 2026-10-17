@@ -47,13 +47,15 @@ src/back/      server only → bin/backend.js
   constants.js · config.js (environment, paths) · main.js (entry) · db.js · static.js · visitors.js
   ws-mini.js · fingerprint.js · market/ (index.js, sources.js)
 src/front/     the page → public/
-  index.html (template) · styles.css · constants.js · main.js (entry) · state.js · dom.js
+  index.html (template) · tokens.css · styles.css · constants.js · main.js (entry) · state.js · dom.js
   i18n.js · identity.js · telemetry.js · camera.js · input.js · render.js · urban.js · hud.js · witness.js
   chronicle.js · store.js · earth.js · gl/ (globe.js, shaders.js) · compute.js · net.js · demo.js
   locales/     en.json, fr.json — embedded in the bundle
+  legal.html · legal.css · legal.js    the legal pages (template, style, language switch)
+  legal/       privacy.<lang>.md, terms.<lang>.md — their texts
   static/      icons, manifest — copied as is
 assets/earth/  Earth data, built once by tools/build-earth.mjs (versioned)
-tools/         build.mjs · build-earth.mjs · build-icons.mjs · long-run.mjs
+tools/         build.mjs · markdown.mjs · build-earth.mjs · build-icons.mjs · long-run.mjs
 public/, bin/  build output (not versioned)
 ```
 
@@ -68,6 +70,7 @@ public/, bin/  build output (not versioned)
    in the page (as data URIs in `demo.html`). The page loads nothing from a third party.
    Every versioned URL (`?v=`) carries the file's fingerprint — the same one the server uses as ETag — so it
    is cached for a year, immutable.
+   The legal pages are built too: `confidentialite.html` and `conditions.html` (see [Legal pages](#legal-pages)).
 3. **`bin/backend.js`.** `src/back/main.js` bundled and minified for Node 22, with a source map.
 
 With `--watch`, every change in `src/` rebuilds; the server restarts when `lib/` or `back/` changed, and
@@ -81,6 +84,20 @@ UI strings live in `src/front/locales/<lang>.json` and are embedded in the bundl
 Adding a language means adding a file. The chronicle is stored as structured entries (kind + parameters) and
 rendered client-side in the visitor's language; lineage names are translated by id.
 
+## Legal pages
+
+| Route | Page | Text |
+|---|---|---|
+| `/confidentialite` | Privacy (service-specific, supplements [drakar.tech/confidentialite](https://drakar.tech/confidentialite)) | `src/front/legal/privacy.<lang>.md` |
+| `/conditions` | Terms of use (service-specific, supplements [drakar.tech/conditions](https://drakar.tech/conditions)) | `src/front/legal/terms.<lang>.md` |
+
+Static pages built from Markdown by `tools/build.mjs` (`tools/markdown.mjs`: headings, paragraphs, lists, tables,
+bold, code, links): every language is in the page and a 1 kB inline script shows the visitor's, picked as on the
+globe (`?lang=`, saved choice, browser) with the same `en fr` switch and the same saved key. They load neither the
+globe nor the engine, nothing from a third party, only the self-hosted fonts. The server serves a path without
+extension from its `.html` file. The globe links to them, discreetly, after the version at the bottom left (not in
+wallpaper mode); the Android app links to them from its settings screen. The labels are in the locales (`legal`).
+
 ## Architecture
 
 - **Simulation** (`src/lib/`): agents, genome, work units (`simulate.js`), the `World` class (lease /
@@ -91,7 +108,7 @@ rendered client-side in the visitor's language; lineage names are translated by 
   19 brotli), `base.png` (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings,
   84 kB), `coasts.bin` (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines
   in zigzag-varint deltas.
-- **Server** (`src/back/`): static files + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), WebSocket `/ws`
+- **Server** (`src/back/`): static files (`/`, `/confidentialite`, `/conditions`, the assets) + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), WebSocket `/ws`
   for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log; see
   [Retention](#retention-of-witness-data)).
 - **Market** (`src/back/market/`): the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking
@@ -161,8 +178,8 @@ visit ≈ 290 kB; later visits ≈ 22 kB, then 304s. In dev, the folder is hot-r
 
 ### What the visitor sees
 
-Nothing explains the page. Top left, the era; top right, the witness (code name, index, climate); bottom
-left, the region being computed; bottom right, the faded chronicle. After five seconds a halo breathes behind
+Nothing explains the page. Top left, the era; top right, the witness (code name — the visitor's sigil —, index,
+climate); bottom left, the region being computed, then the version and the links to the legal pages; bottom right, the faded chronicle. After five seconds a halo breathes behind
 the witness block (composited CSS animation, `opacity` + `transform` only, no CPU cost); on contact, a
 three-second whisper — and, once only, what the page does with the machine. On hover, only settlements give
 their name.

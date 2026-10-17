@@ -32,7 +32,9 @@ export function createStatic(dir, { dev = false, commit = null } = {}) {
   function serve(req, res, url) {
     let p = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     p = path.posix.normalize(p).replace(/^(\.\.\/)+/, '');
-    const e = files.get(p) || (dev ? load(p) : null);
+    // a path without extension is a page: /conditions → conditions.html
+    const page = path.posix.extname(p) ? null : p + '.html';
+    const e = files.get(p) || (page && files.get(page)) || (dev ? load(p) || (page && load(page)) : null);
     if (!e) return false;
     const cache = url.searchParams.get('v') === e.etag.slice(1, -1) ? IMMUTABLE : e.cache;
     if (req.headers['if-none-match'] === e.etag) { res.writeHead(304, { etag: e.etag, 'cache-control': cache }); res.end(); return true; }

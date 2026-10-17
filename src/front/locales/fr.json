@@ -72,5 +72,10 @@
     "takeover": "{name} passe de {vs} à {lin}.",
     "abandon": "{name} est abandonnée.",
     "rebirth": "Un nom oublié revient : {lin}, {where}."
+  },
+  "legal": {
+    "privacy": "Confidentialité",
+    "terms": "Conditions",
+    "globe": "Le globe"
   }
 }

@@ -25,6 +25,9 @@ export function applyLang() {
   document.documentElement.lang = lang;
   document.querySelector('meta[name="description"]').content = t('meta.description');
   $('lang').innerHTML = SUPPORTED.length > 1 ? SUPPORTED.map(l => `<a data-l="${l}" class="${l === lang ? 'on' : ''}">${l}</a>`).join(' ') : '';
+  // the legal pages, in the same language (from the standalone demo, the site's)
+  const site = location.protocol.startsWith('http') ? '' : 'https://world.drakar.tech';
+  $('legal').innerHTML = `<a href="${site}/confidentialite?lang=${lang}">${t('legal.privacy')}</a> · <a href="${site}/conditions?lang=${lang}">${t('legal.terms')}</a>`;
   onChange();
 }
 $('lang').addEventListener('click', e => {

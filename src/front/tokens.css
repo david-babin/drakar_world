@@ -1,0 +1,11 @@
+/* Charte graphique drakar, theme "nuit": the tokens, shared by the globe (styles.css) and the legal pages
+   (legal.css). Inlined into each page by the build. */
+:root {
+  --surface-100: #07090c; --surface-200: #0f1319; --surface-300: #171d25;
+  --ink: #ecebe6; --ink-muted: #9aa3ad; --hairline: #232a33; --hairline-strong: #5e6b7a;
+  --marine-text: #a9bddc; --brass: #d4a53a; --slate: #8aa3b4; --success: #6fbb8d; --danger: #e5796c; --focus: #a9bddc;
+  --font-display: 'Inter Tight', 'Manrope', system-ui, sans-serif;
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 16px;
+}

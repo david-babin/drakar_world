@@ -1,15 +1,6 @@
 /* drakar world — the page. Inlined into index.html by the build.
-   Charte graphique drakar, theme "nuit": tokens below, 4 px grid, no gradient, no shadow.
+   Charte graphique drakar, theme "nuit": tokens in tokens.css, 4 px grid, no gradient, no shadow.
    Brass is rare: the wordmark dot, the region being computed (box and bar). Slate carries the data. */
-:root {
-  --surface-100: #07090c; --surface-200: #0f1319; --surface-300: #171d25;
-  --ink: #ecebe6; --ink-muted: #9aa3ad; --hairline: #232a33; --hairline-strong: #5e6b7a;
-  --marine-text: #a9bddc; --brass: #d4a53a; --slate: #8aa3b4; --success: #6fbb8d; --danger: #e5796c; --focus: #a9bddc;
-  --font-display: 'Inter Tight', 'Manrope', system-ui, sans-serif;
-  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
-  --radius-sm: 4px; --radius-md: 8px; --radius-lg: 16px;
-}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: var(--surface-100); color: var(--ink); overflow: hidden; overscroll-behavior: none; }
 body { font: 400 14px/22px var(--font-sans); -webkit-font-smoothing: antialiased; }
@@ -72,7 +63,12 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #status .num { letter-spacing: 0; }
 #status .bar { display: inline-block; width: 120px; height: 2px; background: var(--hairline); border-radius: 1px; overflow: hidden; }
 #status .bar i { display: block; height: 100%; background: var(--brass); width: 0; transition: width .12s linear; }
-#version { left: 24px; bottom: 16px; font: 400 12px/16px var(--font-mono); color: var(--slate); }
+#version { left: 24px; bottom: 16px; font: 400 12px/16px var(--font-mono); color: var(--slate); white-space: nowrap; }
+/* the legal pages' links, discreet, after the version */
+#legal { pointer-events: auto; margin-left: 16px; font: 400 12px/16px var(--font-sans); color: var(--hairline-strong); }
+#legal a { color: var(--ink-muted); text-decoration: none; transition: color .2s; }
+#legal a:hover { color: var(--ink); }
+#legal a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-sm); }
 
 #tip { position: fixed; pointer-events: none; padding: 8px 12px; background: var(--surface-200); border: 1px solid var(--hairline); border-radius: var(--radius-md); display: none; white-space: nowrap;
   font: 600 14px/20px var(--font-sans); color: var(--ink); }

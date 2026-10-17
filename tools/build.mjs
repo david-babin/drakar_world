@@ -12,6 +12,7 @@
 //      app.js; styles.css minified and inlined into index.html; locales embedded in the bundle; every
 //      versioned URL (?v=) carries the file's fingerprint, the same one the server uses as ETag. The fonts come
 //      from the @fontsource packages (latin + latin-ext only) and are served by the app itself: public/fonts/.
+//      The legal pages (confidentialite.html, conditions.html) are built from src/front/legal/*.md.
 //   3. bin/backend.js: src/back/main.js bundled and minified for Node 22 (no runtime dependencies).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,11 +20,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { fingerprint } from '../src/back/fingerprint.js';
+import { markdown } from './markdown.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const at = (...p) => path.join(ROOT, ...p);
 const EARTH = ['terrain.bin', 'base.png', 'land.bin', 'coasts.bin', 'contours.bin'];
 const PUBLIC = at('public'), BIN = at('bin');
+// the legal pages: URL path → source name (src/front/legal/<name>.<lang>.md); the locale key of its link label
+const LEGAL = { confidentialite: 'privacy', conditions: 'terms' };
 // self-hosted fonts (@fontsource, dev dependencies): package → weights; only these subsets are shipped
 const FONTS = { 'inter-tight': [800], 'manrope': [400, 600, 700, 800], 'jetbrains-mono': [400, 500] };
 const FONT_SUBSETS = ['latin-ext', 'latin'];
@@ -77,7 +81,8 @@ async function bundleFront(assets, engineVersion) {
   return r.outputFiles[0].contents;
 }
 const minCss = async css => (await esbuild.transform(css, { loader: 'css', minify: true })).code.trim();
-const styles = () => minCss(fs.readFileSync(at('src/front/styles.css'), 'utf8'));
+const cssOf = (...files) => minCss(files.map(f => fs.readFileSync(at('src/front', f), 'utf8')).join('\n'));
+const styles = () => cssOf('tokens.css', 'styles.css');
 // @font-face rules of FONTS, taken from the packages' CSS (which carries the unicode-range of each subset);
 // each woff2 is handed to `url(file name, bytes)`, which returns the URL to write in the rule
 function fontFaces(url) {
@@ -128,7 +133,34 @@ async function buildSite() {
   const fonts = fontFaces((file, data) => { put(path.join(PUBLIC, 'fonts', file), data); return `/fonts/${file}?v=${fingerprint(data)}`; });
   const html = await page(`<script src="/engine.js?v=${engineVersion}" defer></script><script src="/app.js?v=${fingerprint(Buffer.from(app))}" defer></script>`, await minCss(fonts));
   put(path.join(PUBLIC, 'index.html'), html);
+  await buildLegal(await minCss(fonts));
   return { app, engine, html };
+}
+
+// the legal pages: static, every language in the page, a few lines of script to show the visitor's; they load
+// neither the globe nor the engine. Texts: src/front/legal/<name>.<lang>.md; labels: the locales' "legal" key.
+async function buildLegal(fonts) {
+  const L = locales(), langs = Object.keys(L).filter(l => Object.values(LEGAL).every(n => fs.existsSync(at('src/front/legal', `${n}.${l}.md`))));
+  const js = (await esbuild.build({
+    entryPoints: [at('src/front/legal.js')], bundle: true, minify: true, format: 'iife', target: ['es2020'],
+    define: { __LANGS__: JSON.stringify(langs) }, legalComments: 'none', write: false, logLevel: 'silent',
+  })).outputFiles[0].text.trim();
+  const style = fonts + await cssOf('tokens.css', 'legal.css'), template = squeezeHtml(fs.readFileSync(at('src/front/legal.html'), 'utf8'));
+  const first = langs.includes('en') ? 'en' : langs[0];
+  for (const [page, name] of Object.entries(LEGAL)) {
+    const text = Object.fromEntries(langs.map(l => [l, fs.readFileSync(at('src/front/legal', `${name}.${l}.md`), 'utf8')]));
+    const hide = l => l === first ? '' : ' hidden';
+    const link = (l, to, label) => `<a data-page="${to}" href="${to}"${to === '/' + page ? ' aria-current="page"' : ''}>${label}</a>`;
+    const html = template
+      .replace('/*__TITLE__*/', () => text[first].match(/^# (.*)$/m)[1].replace(/&/g, '&amp;').replace(/</g, '&lt;'))
+      .replace('/*__CSS__*/', () => style)
+      .replace('/*__LANGS__*/', () => langs.length > 1 ? langs.map(l => `<a data-l="${l}" href="?lang=${l}"${l === first ? ' class="on"' : ''}>${l}</a>`).join(' ') : '')
+      .replace('/*__ARTICLES__*/', () => langs.map(l => `<article data-lang="${l}" lang="${l}"${hide(l)}>${markdown(text[l])}</article>`).join(''))
+      .replace('/*__NAV__*/', () => langs.map(l => `<nav data-lang="${l}"${hide(l)}>${
+        Object.entries(LEGAL).map(([p, n]) => link(l, '/' + p, L[l].legal[n])).join(' · ')} · ${link(l, '/', L[l].legal.globe)}</nav>`).join(''))
+      .replace('/*__JS__*/', () => js.replace(/<\/script/gi, '<\\/script'));
+    put(path.join(PUBLIC, page + '.html'), html);
+  }
 }
 
 async function buildDemo(app, engine) {
