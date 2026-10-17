@@ -127,3 +127,48 @@ console.log(w.s.chronicle.slice(-6).map(c => `  year ${Math.floor(c.tick / 4)}  
     console.log(`engine OK · ${(fs.statSync(file).size / 1024).toFixed(1)} kB · 30 units identical to the library, verified by the world`);
   }
 }
+
+// ---------- retention: the witnesses' sigils are forgotten after RETENTION_MS, the world is not ----------
+// Two identical worlds; one forgets. Both must keep computing the same units and results (sigils play no
+// part in the simulation), while no old sigil remains in the one that forgot.
+{
+  const os = await import('node:os'), path = await import('node:path');
+  const { RETENTION_MS } = await import('../src/back/constants.js');
+  const { openDatabase } = await import('../src/back/db.js');
+  const now = Date.now(), before = now - RETENTION_MS, old = now - RETENTION_MS - 30 * 86400_000;
+  const run = (wr, sigil, at, n) => {
+    const hashes = [];
+    for (let i = 0; i < n; i++) {
+      wr.setMarket({ change: Math.sin(i / 7) });
+      const u = wr.lease(sigil, at + i), r = simulateUnit(wr.T, u);
+      hashes.push(hashResult(r));
+      if (!wr.integrate(r, sigil, { now: at + i }).ok) throw new Error('retention: integration refused');
+    }
+    return hashes.join();
+  };
+  const a = World.create(17, TERRAIN, old), b = World.create(17, TERRAIN, old);
+  for (const wr of [a, b]) { run(wr, 'OLDW-0001', old, 40); run(wr, 'NEWW-0001', now - 1000, 10); }
+  a.s.settlements.push({ id: 9e8, x: 1, y: 1, lin: 0, name: 'legacy', founded: 0, sigil: 'GONE-0001' });   // saved before `at` existed
+  a.s.settlements.push({ id: 9e8 + 1, x: 2, y: 1, lin: 0, name: 'legacy', founded: 0, sigil: 'NEWW-0001' });
+  const n = a.forget(before);
+  a.s.settlements = a.s.settlements.filter(st => st.id < 9e8);
+  const json = JSON.stringify(a.s);
+  if (json.includes('OLDW-0001') || json.includes('GONE-0001')) throw new Error('retention: an old sigil survived the purge');
+  if (!a.s.contributors['NEWW-0001'] || a.s.contributors['OLDW-0001']) throw new Error('retention: wrong contributors kept');
+  if (!a.s.chronicle.some(e => e.sigil === 'NEWW-0001')) throw new Error('retention: a recent chronicle entry lost its sigil');
+  if (!n.entries || !n.settlements) throw new Error('retention: nothing anonymized');
+  if (run(a, 'NEWW-0001', now, 30) !== run(b, 'NEWW-0001', now, 30)) throw new Error('retention: forgetting changed the simulation');
+  const strip = w => JSON.stringify({ ...w.snapshot(1), chronicle: null, contributors: null, settlements: w.s.settlements.map(st => [st.id, st.x, st.y, st.lin, st.seen]), routes: w.s.routes.map(r => [r.a, r.b, r.lin]) });
+  if (strip(a) !== strip(b)) throw new Error('retention: the two worlds diverged');
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'drakar-world-')), 'world.db');
+  const store = openDatabase(file);
+  for (const t of [old, old + 1, now]) store.logUnit(t, 0, 0, 'OLDW-0001', 'h', 0, 1, 1, 0);
+  for (const t of [old, old + 1]) store.snapshot(t, 0, '{}');
+  let p = store.purge(before);
+  if (p.units !== 2 || p.snapshots !== 1) throw new Error(`retention: purge removed ${p.units} units, ${p.snapshots} snapshots`);
+  store.snapshot(now, 0, '{}'); p = store.purge(before);
+  if (p.snapshots !== 1 || store.recentUnits(10).length !== 1) throw new Error('retention: wrong rows left in the database');
+  store.close(); fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  console.log(`retention OK · ${n.contributors} contributor, ${n.entries} entries, ${n.settlements} settlements, ${n.routes} routes anonymized · simulation unchanged · old units and snapshots deleted, latest snapshot kept`);
+}

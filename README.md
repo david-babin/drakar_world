@@ -92,7 +92,8 @@ rendered client-side in the visitor's language; lineage names are translated by 
   84 kB), `coasts.bin` (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines
   in zigzag-varint deltas.
 - **Server** (`src/back/`): static files + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), WebSocket `/ws`
-  for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log).
+  for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log; see
+  [Retention](#retention-of-witness-data)).
 - **Market** (`src/back/market/`): the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking
   the S&P 500, the index itself being paid data) over REST at startup and every 10 min, then **live trades over
   WebSocket** (`wss://ws.finnhub.io`) — the climate breathes during the session, broadcast at most once per
@@ -187,6 +188,28 @@ leases again. A lease
 request unanswered for 20 s also closes the connection. A unit whose computation was interrupted for more than
 80 s (hidden tab, sleep) is not sent: its lease expired and the region was reassigned. Server side, a Finnhub
 feed silent for 3 min is closed and reopened.
+
+### Retention of witness data
+
+A witness is known only by its sigil (`ABCD-1234`, drawn on its device; without one, derived from IP and user
+agent): pseudonymous data, kept **12 months** (`RETENTION_MS` in `src/back/constants.js`). The purge runs at
+startup and then daily (`PURGE_EVERY_MS`):
+
+| Where | After 12 months |
+|---|---|
+| `units` table (unit log: time, region, sigil, hash, duration) | deleted |
+| `snapshots` table (hourly copies of the state, sigils included) | deleted, except the latest one |
+| `contributors` in the state (units, ticks, decisions, first, last per sigil) | deleted, 12 months after the witness's last unit |
+| chronicle entries (`t`) | kept, sigil replaced by `—` |
+| settlements and routes (`at`, the time they were recorded) | kept, sigil removed |
+
+Settlements, routes and chronicle entries are the shared world's history and game state, so they are
+anonymized rather than deleted. Sigils play no part in the simulation (they are neither in what a unit computes
+nor in its hash): forgetting them changes nothing to what the witnesses compute (`npm test` checks it).
+Settlements and routes saved before `at` existed are dated by their witness: their sigil is removed unless that
+witness is still a contributor whose first unit is less than 12 months old. A snapshot is a copy of the state as
+it was: a sigil can therefore outlive its removal from the state in the snapshots taken before, at most until
+those are deleted. Bans (address, sigil) are kept in memory only, for 24 hours.
 
 ### Climate = market
 

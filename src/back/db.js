@@ -1,4 +1,5 @@
 // Persistence: one SQLite file holding the current world, hourly snapshots and the log of units.
+// Snapshots and units older than RETENTION_MS are purged (see purge, called by main.js).
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -24,6 +25,9 @@ export function openDatabase(file) {
     save: db.prepare('INSERT INTO world (id, state, saved_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, saved_at = excluded.saved_at'),
     snap: db.prepare('INSERT INTO snapshots (taken_at, tick, state) VALUES (?, ?, ?)'),
     unit: db.prepare('INSERT INTO units (at, region, tick, sigil, hash, verified, ok, ms, climate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    purgeUnits: db.prepare('DELETE FROM units WHERE at < ?'),
+    // a snapshot is a copy of the state, sigils included: deleted once past the retention, except the latest one
+    purgeSnapshots: db.prepare('DELETE FROM snapshots WHERE taken_at < ? AND id < (SELECT MAX(id) FROM snapshots)'),
     recent: db.prepare('SELECT at, region, tick, sigil, verified, ok, ms, climate FROM units ORDER BY id DESC LIMIT ?'),
   };
   return {
@@ -33,6 +37,8 @@ export function openDatabase(file) {
     snapshot: (now, tick, json) => q.snap.run(now, tick, json),
     logUnit: (...v) => q.unit.run(...v),
     recentUnits: n => q.recent.all(n),
+    // retention: removes the unit log and the snapshots older than `before` (ms); returns the rows deleted
+    purge: before => ({ units: Number(q.purgeUnits.run(before).changes), snapshots: Number(q.purgeSnapshots.run(before).changes) }),
     close: () => db.close(),
   };
 }

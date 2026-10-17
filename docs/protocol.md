@@ -89,6 +89,10 @@ takeover). Every message is an object with a type `t`.
 | lineage | `[id, name, hue, dead]` (dead: tick of extinction or null) |
 | region | `[id, tick, units, last]` — 24 regions, 6 × 4 boxes of 64 × 48 cells, id = ry × 6 + rx |
 
+A sigil may be missing: `''` for a settlement or a route, `'—'` for a chronicle entry. Entries written by the world
+itself have none, and the server forgets the sigils older than 12 months (retention, see the README); the
+object itself stays.
+
 Chronicle kinds and `params`: `genesis {n}` · `found {name}` · `raid {vs}` · `voyage` · `route {from, to, sea}` ·
 `extinction` · `freeze {days}` · `wind {regime}` (plenty / ordinary / scarcity) · `crossing` · `assimilate {vs}` ·
 `revolt {vs}` · `takeover {name, vs}` · `abandon {name}` · `rebirth`. `lin`, `vs`: lineage ids (names are

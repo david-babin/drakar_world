@@ -6,6 +6,10 @@ export const VERIFY_EVERY = 7;                 // 1 unit in 7 is recomputed serv
 export const SAVE_MS = 5000;                   // the world is written to SQLite at most this often
 export const SNAPSHOT_MS = 3600_000;           // one dated snapshot per hour
 export const LEGACY_DB = 'monde.db';           // former database name, adopted on startup
+// retention of the witnesses' pseudonymous data (sigils, privacy policy): the unit log, the snapshots and the
+// sigils kept in the world (contributors, chronicle, settlements, routes) are deleted or anonymized past this age
+export const RETENTION_MS = 365 * 86400_000;   // 12 months
+export const PURGE_EVERY_MS = 86400_000;       // the purge runs at startup, then daily
 
 // visitors (WebSocket)
 export const WS_PATH = '/ws';

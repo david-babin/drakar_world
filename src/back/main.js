@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { World, loadTerrain, packEntry, regimeOf } from '../lib/index.js';
 import { config } from './config.js';
-import { SAVE_MS, SNAPSHOT_MS, RECENT_UNITS, ENGINE_FILE, CORS_ORIGINS } from './constants.js';
+import { SAVE_MS, SNAPSHOT_MS, RETENTION_MS, PURGE_EVERY_MS, RECENT_UNITS, ENGINE_FILE, CORS_ORIGINS } from './constants.js';
 import { openDatabase } from './db.js';
 import { createStatic } from './static.js';
 import { createVisitors } from './visitors.js';
@@ -30,6 +30,17 @@ function save(force = false) {
   dirty = false;
 }
 setInterval(save, SAVE_MS).unref();
+
+// retention: the witnesses' pseudonymous data older than RETENTION_MS is forgotten, at startup and then daily
+function purge() {
+  const before = Date.now() - RETENTION_MS;
+  const w = world.forget(before), db = store.purge(before);
+  if (w.contributors + w.entries + w.settlements + w.routes) { markDirty(); save(); }
+  if (w.contributors + w.entries + w.settlements + w.routes + db.units + db.snapshots)
+    console.log(`retention · forgot ${w.contributors} contributors, the sigil of ${w.entries} entries, ${w.settlements} settlements, ${w.routes} routes · deleted ${db.units} units, ${db.snapshots} snapshots`);
+}
+purge();
+setInterval(purge, PURGE_EVERY_MS).unref();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { save(true); market.stop(); store.close(); process.exit(0); });
 
 // ---------- HTTP: read API + static files ----------

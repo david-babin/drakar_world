@@ -59,6 +59,7 @@ function shiftDates(s, shift) {
   for (const e of s.chronicle) e.t += shift;
   for (const r of s.regions) if (r.last) r.last += shift;
   for (const c of Object.values(s.contributors)) { c.first += shift; c.last += shift; }
+  for (const o of [...s.settlements, ...s.routes]) if (o.at) o.at += shift;
   return s;
 }
 let w;

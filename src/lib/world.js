@@ -126,7 +126,7 @@ export class World {
       .map(a => ({ id: a.id, x: wrapX(a.x), y: a.y, dx: a.dx | 0, dy: a.dy | 0, pop: a.pop | 0, food: Math.floor(a.food), g: a.g.map(v => v | 0), lin: a.lin | 0, born: a.born | 0, stay: a.stay | 0 }));
     this.s.agents = this.s.agents.filter(a => !ids.has(a.id)).concat(incoming);
     const newSettlements = [], newRoutes = [];
-    for (const st of result.settlements || []) { const o = { id: st.id, x: wrapX(st.x | 0), y: st.y | 0, lin: st.lin | 0, name: String(st.name).slice(0, 24), founded: st.founded | 0, sigil }; this.s.settlements.push(o); newSettlements.push(o); }
+    for (const st of result.settlements || []) { const o = { id: st.id, x: wrapX(st.x | 0), y: st.y | 0, lin: st.lin | 0, name: String(st.name).slice(0, 24), founded: st.founded | 0, sigil, at: now }; this.s.settlements.push(o); newSettlements.push(o); }
     // existing settlements of the leased region only: lineage takeovers, "seen" marks, abandonments
     const inRegion = st => regionOf(st.x, st.y) === result.region;
     const byId = new Map(this.s.settlements.map(st => [st.id, st]));
@@ -135,7 +135,7 @@ export class World {
     for (const id of result.removed || []) { const st = byId.get(id); if (st && inRegion(st)) removedOut.push(id); }
     if (removedOut.length) { const x = new Set(removedOut); this.s.settlements = this.s.settlements.filter(st => !x.has(st.id)); this.s.routes = this.s.routes.filter(r => !x.has(r.a) && !x.has(r.b)); }
     const have = new Set(this.s.settlements.map(s => s.id));
-    for (const r of result.routes || []) if (have.has(r.a) && have.has(r.b)) { const o = { a: r.a, b: r.b, lin: r.lin | 0, tick: r.tick | 0, sea: r.sea ? 1 : 0, sigil }; this.s.routes.push(o); newRoutes.push(o); }
+    for (const r of result.routes || []) if (have.has(r.a) && have.has(r.b)) { const o = { a: r.a, b: r.b, lin: r.lin | 0, tick: r.tick | 0, sea: r.sea ? 1 : 0, sigil, at: now }; this.s.routes.push(o); newRoutes.push(o); }
 
     const reg = this.s.regions[result.region];
     reg.tick += STEPS; reg.units++; reg.last = now;
@@ -202,6 +202,24 @@ export class World {
     this.s.chronicle.push(entry);
     if (this.s.chronicle.length > CHRONICLE_KEEP) this.s.chronicle.splice(0, this.s.chronicle.length - CHRONICLE_KEEP);
     return entry;
+  }
+
+  // Retention of the witnesses' pseudonymous data (sigils): what was recorded before `before` (ms) is forgotten.
+  //   contributors last seen before it are deleted;
+  //   chronicle entries, settlements and routes recorded before it keep their place in the world but lose their
+  //   sigil (entries get the neutral '—', settlements and routes none). Sigils play no part in the simulation
+  //   (neither in the units nor in the result hash), so this changes nothing to what the witnesses compute.
+  // Settlements and routes recorded before `at` existed are dated by their witness: anonymous unless that
+  // witness is still a contributor whose first unit is recent.
+  // Returns what changed: { contributors, entries, settlements, routes }.
+  forget(before) {
+    const s = this.s, n = { contributors: 0, entries: 0, settlements: 0, routes: 0 };
+    for (const [sigil, c] of Object.entries(s.contributors)) if (!(c.last >= before)) { delete s.contributors[sigil]; n.contributors++; }
+    for (const e of s.chronicle) if (e.sigil !== '—' && !(e.t >= before)) { e.sigil = '—'; n.entries++; }
+    const old = o => o.at != null ? o.at < before : !(s.contributors[o.sigil]?.first >= before);
+    const strip = (list, key) => { for (const o of list) if (o.sigil && old(o)) { delete o.sigil; delete o.at; n[key]++; } };
+    strip(s.settlements, 'settlements'); strip(s.routes, 'routes');
+    return n;
   }
 
   // compact snapshot (wire format); the client unpacks it with unpackSnapshot
