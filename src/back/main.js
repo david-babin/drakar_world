@@ -50,6 +50,8 @@ const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'applic
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
+    // Health check of the container (Dockerfile HEALTHCHECK, read by Coolify and drakar status).
+    if (url.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'no-store' }); return res.end('ok\n'); }
     if (url.pathname.startsWith('/api/')) {
       if (CORS_ORIGINS.has(req.headers.origin)) res.setHeader('access-control-allow-origin', req.headers.origin);
       res.setHeader('vary', 'Origin');

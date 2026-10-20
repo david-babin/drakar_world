@@ -32,6 +32,9 @@ COPY --from=build --chown=node:node /src/public ./public
 
 USER node
 EXPOSE 8787
+# Healthy when the server answers /healthz (Node's own fetch: the image has no curl).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 
 # node as PID 1 (not npm): it receives SIGTERM directly and saves the world before stopping.
 CMD ["node", "--no-warnings", "bin/backend.js"]

@@ -112,7 +112,7 @@ wallpaper mode); the Android app links to them from its settings screen. The lab
   19 brotli), `base.png` (768 × 384, classes and elevation level, 35 kB), `land.bin` (1,419 unwrapped rings,
   84 kB), `coasts.bin` (1,424 arcs, 86 kB), `contours.bin` (500 / 1000 / 2000 / 3000 / 4000 m, 107 kB). Lines
   in zigzag-varint deltas.
-- **Server** (`src/back/`): static files (`/`, `/confidentialite`, `/conditions`, the assets) + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), WebSocket `/ws`
+- **Server** (`src/back/`): static files (`/`, `/confidentialite`, `/conditions`, the assets) + read API (`/api/world`, `/api/market`, `/api/stats`, `/api/summary`; CORS open to the drakar pages), `/healthz` (`ok`, the image's `HEALTHCHECK`, read by Coolify and drakar status), WebSocket `/ws`
   for everything else (`visitors.js`), SQLite persistence (current state, hourly snapshots, unit log; see
   [Retention](#retention-of-witness-data)).
 - **Market** (`src/back/market/`): the index as the climate. With `FINNHUB_KEY`: SPY quote (the ETF tracking
