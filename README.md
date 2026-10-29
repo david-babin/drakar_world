@@ -31,7 +31,7 @@ Variables: `PORT` (8787), `DB` (./world.db), `SEED` (world seed, ignored once th
 ### Production (Coolify)
 
 "Dockerfile" build pack, two stages: the first installs the dev dependencies and runs the build, the
-second only receives `bin/` and `public/` (Node 22, no dependencies). Exposed port: `8787`. Coolify must fetch the
+second only receives `bin/` and `public/` (Node 22 alone: npm, npx, corepack and yarn are removed; no dependencies). Exposed port: `8787`. Coolify must fetch the
 `brand` submodule (drakar_brand): its GitHub app needs access to that repository, as for drakar_share; the build stops otherwise.
 Variables: `FINNHUB_KEY` (secret), optionally `MARKET_SYMBOL`. `DB` is `/app/data/world.db` in the image:
 mount a **persistent volume on `/app/data`**, otherwise the world starts over on every deployment. A legacy

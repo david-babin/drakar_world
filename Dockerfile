@@ -14,7 +14,7 @@ ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 RUN npm run build
 
-# ---- runtime: no dependencies (node:sqlite and WebSocket are built into Node 22) ----
+# ---- runtime: node alone, no dependencies (node:sqlite and WebSocket are built into Node 22) ----
 FROM node:22-slim
 ENV NODE_ENV=production \
     PORT=8787 \
@@ -24,7 +24,11 @@ WORKDIR /app
 # Database folder: mount it as a persistent volume (/app/data) in Coolify.
 # Created here with the right owner so that a fresh volume inherits the permissions.
 # A legacy /app/data/monde.db is adopted (renamed to world.db) on startup.
-RUN mkdir -p /app/data && chown node:node /app/data
+# The server needs node only: npm, npx, corepack and yarn come with the image
+# and carry vulnerabilities of their own (Trivy, drakar status), so they go.
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+      /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-* \
+ && mkdir -p /app/data && chown node:node /app/data
 
 COPY --chown=node:node package.json ./
 COPY --from=build --chown=node:node /src/bin ./bin
